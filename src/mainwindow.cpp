@@ -16,6 +16,20 @@
 static const int FRAME_MS = 16;
 static const int PUMP_BUDGET_MS = 10;
 
+/* A menu shortcut that leaves every Ctrl chord to the guest. main() keeps
+ * Qt from swapping Control and Command on macOS, so there "Ctrl" in a key
+ * sequence is the real Control key; menus go on Command (Qt's Meta) instead.
+ * Elsewhere, Ctrl+Shift keeps them off the guest's control codes. */
+static QKeySequence
+shortcut(Qt::Key key)
+{
+#ifdef Q_OS_MACOS
+	return QKeySequence(Qt::META | key);
+#else
+	return QKeySequence(Qt::CTRL | Qt::SHIFT | key);
+#endif
+}
+
 MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	: QMainWindow(parent)
 {
@@ -26,11 +40,11 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	connect(screen, &Screen::keyBytes, this, &MainWindow::sendKeys);
 
 	QMenu *conn = menuBar()->addMenu("&Connection");
-	conn->addAction("&Connect…", QKeySequence("Ctrl+K"), this,
+	conn->addAction("&Connect…", shortcut(Qt::Key_K), this,
 	    &MainWindow::choosePort);
 	conn->addAction("&Disconnect", this, &MainWindow::disconnectPort);
 	conn->addSeparator();
-	conn->addAction("&Reset Screen", QKeySequence("Ctrl+R"), this,
+	conn->addAction("&Reset Screen", shortcut(Qt::Key_R), this,
 	    &MainWindow::resetScreen);
 
 	state = new QLabel(this);
