@@ -25,6 +25,11 @@ struct Prefs {
 	Scaling scaling = ScaleFit;
 	bool smooth = true;
 
+	/* The text area: match the Term descriptor's IT.COL x IT.ROW, which is
+	 * what SS.ScSiz tells programs (see Terminal::setTextArea). */
+	int text_cols = 80;
+	int text_rows = 25;
+
 	bool auto_reconnect = true;
 	bool clear_on_reconnect = true;
 	bool connect_at_start = true;

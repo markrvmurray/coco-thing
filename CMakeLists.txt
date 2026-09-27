@@ -79,3 +79,8 @@ add_executable(test_fontface tests/test_fontface.cpp)
 target_link_libraries(test_fontface PRIVATE termcore)
 add_test(NAME fontface COMMAND test_fontface)
 set_tests_properties(fontface PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+add_executable(test_screen tests/test_screen.cpp src/screen.cpp src/keymap.cpp)
+target_link_libraries(test_screen PRIVATE termcore Qt6::Widgets)
+add_test(NAME screen COMMAND test_screen)
+set_tests_properties(screen PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)

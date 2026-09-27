@@ -13,6 +13,8 @@
 #include "video.h"
 #include "video_render.h"
 
+const QColor Screen::UNUSED(0x55, 0x55, 0x55);
+
 Screen::Screen(QWidget *parent)
 	: QWidget(parent)
 {
@@ -33,6 +35,7 @@ Screen::Screen(QWidget *parent)
 	}
 	image.setColorTable(lut);
 
+	area = QSize(FB_WIDTH, FB_HEIGHT);
 	setFocusPolicy(Qt::StrongFocus);
 	setAttribute(Qt::WA_OpaquePaintEvent);
 }
@@ -48,6 +51,13 @@ Screen::setScaling(bool i, bool s)
 {
 	integer = i;
 	smooth = s;
+	update();
+}
+
+void
+Screen::setTextArea(int cols, int rows)
+{
+	area = QSize(cols * CHAR_W, rows * CHAR_H).boundedTo(image.size());
 	update();
 }
 
@@ -68,6 +78,16 @@ Screen::paintEvent(QPaintEvent *)
 	p.setRenderHint(QPainter::SmoothPixmapTransform,
 	    smooth && fit.width() % FB_WIDTH != 0);
 	p.drawImage(target, image);
+
+	// Drawn over the framebuffer at every paint, so nothing the board
+	// sends -- a clear, graphics with the window's clip lifted -- can
+	// paint the unused part of the panel.
+	p.translate(target.topLeft());
+	p.scale((qreal)fit.width() / FB_WIDTH, (qreal)fit.height() / FB_HEIGHT);
+	p.fillRect(QRect(area.width(), 0, FB_WIDTH - area.width(), FB_HEIGHT),
+	    UNUSED);
+	p.fillRect(QRect(0, area.height(), area.width(),
+	    FB_HEIGHT - area.height()), UNUSED);
 }
 
 void

@@ -172,6 +172,47 @@ test_face(Terminal &t)
 	CHECK(!cell_blank(0, 0, bg));
 }
 
+/* minted asks SS.ScSiz for the screen size, which over serial is the Term
+ * descriptor's 80x25, then draws each screen row as exactly 80 characters,
+ * space-padded, back to back with no CR or LF: it relies on the terminal
+ * wrapping at column 80. With the text area at 80x25 it must. */
+static void
+test_text_area_wraps_like_minted(Terminal &t)
+{
+	const int cols = 80, rows = 25;
+	const int col0 = 0, row0 = 0;		/* the top left corner */
+
+	t.setTextArea(cols, rows);
+	t.reset();
+	t.feed(QByteArray("\x05\x20\x0C", 3));	/* cursor off, clear */
+	settle(t);
+	const uint8_t bg = video_framebuffer[0][0];
+
+	/* Three rows, as minted's _render writes them: a short line padded
+	 * with spaces to the full width, then the next. */
+	QByteArray screen;
+	for (const char *line : { "#include <stdio.h>", "", "int main()" }) {
+		QByteArray row(line);
+		row += QByteArray(cols - row.size(), ' ');
+		screen += row;
+	}
+	t.feed(screen);
+	settle(t);
+
+	CHECK(!cell_blank(col0, row0, bg));		/* '#' */
+	CHECK(cell_blank(col0 + cols, row0, bg));	/* outside the window */
+	CHECK(cell_blank(col0 + 18, row0, bg));	/* the padding */
+	CHECK(!cell_blank(col0, row0 + 2, bg));	/* 'i' of int */
+	/* On a 128-column line the third row would have started at column
+	 * 160 % 128 = 32 of the second line, on the right of the screen. */
+	CHECK(cell_blank(col0 + 32, row0 + 1, bg));
+
+	/* Back to the whole panel for any later test. */
+	t.setTextArea(TEXT_COLS, TEXT_ROWS);
+	t.reset();
+	settle(t);
+}
+
 int
 main()
 {
@@ -181,6 +222,7 @@ main()
 	test_text(t);
 	test_bar(t);
 	test_face(t);
+	test_text_area_wraps_like_minted(t);
 
 	if (failures == 0)
 		printf("test_terminal: all passed\n");

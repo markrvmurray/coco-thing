@@ -18,6 +18,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QSpinBox>
 #include <QTabWidget>
 #include <QVBoxLayout>
 
@@ -140,7 +141,31 @@ PrefsDialog::displayTab(const Prefs &p)
 	smooth = new QCheckBox("Smooth the picture when scaling by a fraction");
 	smooth->setChecked(p.smooth);
 
+	text_cols = new QSpinBox;
+	text_cols->setRange(20, 128);
+	text_cols->setValue(p.text_cols);
+	text_rows = new QSpinBox;
+	text_rows->setRange(4, 30);
+	text_rows->setValue(p.text_rows);
+	QHBoxLayout *area = new QHBoxLayout;
+	area->addWidget(text_cols);
+	area->addWidget(new QLabel("columns \u00D7"));
+	area->addWidget(text_rows);
+	area->addWidget(new QLabel("rows"));
+	area->addStretch(1);
+
+	QLabel *note = new QLabel("Set the text area to the console "
+	    "descriptor's size (IT.COL \u00D7 IT.ROW; 80 \u00D7 25 for the "
+	    "Pico-Thing's Term). Programs are told that size, and some, such as "
+	    "minted, send each screen row at exactly that width and rely on the "
+	    "terminal wrapping there. 128 \u00D7 30 uses the whole panel; "
+	    "anything smaller is a window in its top left corner, with the rest "
+	    "shown grey. A change clears the screen.");
+	note->setWordWrap(true);
+
 	QFormLayout *f = new QFormLayout(tab);
+	f->addRow("Text area:", area);
+	f->addRow("", note);
 	f->addRow("Scaling:", scaling);
 	f->addRow("", smooth);
 	return tab;
@@ -180,6 +205,8 @@ PrefsDialog::prefs() const
 	p.keep_box_glyphs = keep_box->isChecked();
 	p.scaling = (Prefs::Scaling)scaling->currentData().toInt();
 	p.smooth = smooth->isChecked();
+	p.text_cols = text_cols->value();
+	p.text_rows = text_rows->value();
 	p.auto_reconnect = auto_reconnect->isChecked();
 	p.clear_on_reconnect = clear_on_reconnect->isChecked();
 	p.connect_at_start = connect_at_start->isChecked();

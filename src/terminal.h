@@ -35,6 +35,17 @@ public:
 	 * chosen face (below) survives it. */
 	void reset();
 
+	/* The text area the board's programs are told about: the Term
+	 * descriptor's IT.COL x IT.ROW, which SS.ScSiz reports over serial.
+	 * Programs such as minted draw rows of exactly that many characters
+	 * back to back and rely on the terminal wrapping at its right edge,
+	 * so the terminal must wrap there too. Anything smaller than the
+	 * panel (128x30) becomes a window in its top left corner. Takes
+	 * effect at the next reset(). */
+	void setTextArea(int cols, int rows);
+	int textCols() const { return area_cols; }
+	int textRows() const { return area_rows; }
+
 	/* Draw text with `face` (the layout in fontface.h); empty for the
 	 * firmware's built-in face. What is on screen is redrawn with it. */
 	void setFace(const QByteArray &face);
@@ -45,8 +56,11 @@ public:
 private:
 	bool fill_fifo();
 	void applyFace();
+	QByteArray windowSetup() const;
 
 	QByteArray pending;
 	qsizetype pending_pos = 0;
 	QByteArray face;	/* the renderer points into this */
+	int area_cols;
+	int area_rows;
 };

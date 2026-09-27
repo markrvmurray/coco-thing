@@ -20,8 +20,12 @@
  * guest's Font command sets it. NULL selects the built-in face. */
 void vidterm_set_font(const uint8_t *data, uint32_t len);
 
+/* The window the terminal opens for a text area smaller than the panel.
+ * Any id but 0 (the root, the panel itself) would do. */
+static const uint8_t AREA_WINDOW = 1;
+
 Terminal::Terminal(QObject *parent)
-	: QObject(parent)
+	: QObject(parent), area_cols(TEXT_COLS), area_rows(TEXT_ROWS)
 {
 	reset();
 }
@@ -44,6 +48,37 @@ Terminal::reset()
 	// chosen face back.
 	vid_link_render();
 	applyFace();
+
+	// Open the text area ahead of anything from the board, through the
+	// same interpreter the board's own window commands use.
+	feed(windowSetup());
+}
+
+void
+Terminal::setTextArea(int cols, int rows)
+{
+	area_cols = qBound(1, cols, (int)TEXT_COLS);
+	area_rows = qBound(1, rows, (int)TEXT_ROWS);
+}
+
+QByteArray
+Terminal::windowSetup() const
+{
+	if (area_cols == TEXT_COLS && area_rows == TEXT_ROWS)
+		return {};	/* the root is already the whole panel */
+
+	// DWSet id, type, column, row, width, height, fg, bg (the renderer
+	// uses the geometry; type 2 is the CoCo3's 80-column text and the
+	// colours are its defaults), then make it both where text goes and
+	// what is on screen.
+	const uint8_t setup[] = {
+		0x1B, 0x20, AREA_WINDOW, 0x02,
+		0x00, 0x00,		/* the top left corner */
+		(uint8_t)area_cols, (uint8_t)area_rows, 0x07, 0x00,
+		0x1B, 0x21, AREA_WINDOW,
+		0x1B, 0x26, AREA_WINDOW,
+	};
+	return QByteArray(reinterpret_cast<const char *>(setup), sizeof(setup));
 }
 
 void

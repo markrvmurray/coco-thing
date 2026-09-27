@@ -112,6 +112,14 @@ MainWindow::applyPrefs()
 		    "face").arg(error));
 	terminal.setFace(face);
 
+	// A new text area means a new window, which starts clear.
+	if (prefs.text_cols != terminal.textCols() ||
+	    prefs.text_rows != terminal.textRows()) {
+		terminal.setTextArea(prefs.text_cols, prefs.text_rows);
+		terminal.reset();
+		screen->setTextArea(terminal.textCols(), terminal.textRows());
+	}
+
 	screen->setScaling(prefs.scaling == Prefs::ScaleInteger, prefs.smooth);
 	link.setAutoReconnect(prefs.auto_reconnect);
 	screen->update();

@@ -18,6 +18,7 @@ class QFontComboBox;
 class QLabel;
 class QLineEdit;
 class QRadioButton;
+class QSpinBox;
 
 class PrefsDialog : public QDialog {
 	Q_OBJECT
@@ -50,6 +51,8 @@ private:
 
 	QComboBox *scaling;
 	QCheckBox *smooth;
+	QSpinBox *text_cols;
+	QSpinBox *text_rows;
 
 	QCheckBox *auto_reconnect;
 	QCheckBox *clear_on_reconnect;
