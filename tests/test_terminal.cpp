@@ -127,6 +127,51 @@ test_bar(Terminal &t)
 	CHECK(video_framebuffer[301][150] == bg);
 }
 
+/* Every pixel of the cell one colour, and not the background: a glyph drawn
+ * with every row $FF. */
+static bool
+cell_solid(int col, int row, uint8_t bg)
+{
+	const uint8_t fg = video_framebuffer[row * CHAR_H][col * CHAR_W];
+
+	if (fg == bg)
+		return false;
+	for (int y = row * CHAR_H; y < (row + 1) * CHAR_H; y++)
+		for (int x = col * CHAR_W; x < (col + 1) * CHAR_W; x++)
+			if (video_framebuffer[y][x] != fg)
+				return false;
+	return true;
+}
+
+/* A chosen face draws the text, redraws what is already on screen, and
+ * survives a reset; an empty one puts the built-in face back. */
+static void
+test_face(Terminal &t)
+{
+	QByteArray solid_x(4096, 0);
+	for (int r = 0; r < 16; r++)
+		solid_x['X' * 16 + r] = (char)0xFF;
+
+	t.feed(QByteArray("\x05\x20\x0C", 3) + "X");
+	settle(t);
+	const uint8_t bg = video_framebuffer[FB_HEIGHT - 1][FB_WIDTH - 1];
+	CHECK(!cell_solid(0, 0, bg));		/* Spleen's X */
+
+	t.setFace(solid_x);			/* no new bytes */
+	settle(t);
+	CHECK(cell_solid(0, 0, bg));
+
+	t.reset();
+	t.feed(QByteArray("\x05\x20\x0C", 3) + "X");
+	settle(t);
+	CHECK(cell_solid(0, 0, bg));
+
+	t.setFace({});
+	settle(t);
+	CHECK(!cell_solid(0, 0, bg));
+	CHECK(!cell_blank(0, 0, bg));
+}
+
 int
 main()
 {
@@ -135,6 +180,7 @@ main()
 	test_backlog_is_lossless(t);
 	test_text(t);
 	test_bar(t);
+	test_face(t);
 
 	if (failures == 0)
 		printf("test_terminal: all passed\n");

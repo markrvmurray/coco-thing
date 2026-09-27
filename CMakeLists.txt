@@ -41,9 +41,13 @@ add_library(termcore STATIC
     src/terminal.h
     src/link.cpp
     src/link.h
+    src/fontface.cpp
+    src/fontface.h
+    src/prefs.cpp
+    src/prefs.h
 )
 target_include_directories(termcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(termcore PUBLIC pvcore Qt6::Core Qt6::SerialPort)
+target_link_libraries(termcore PUBLIC pvcore Qt6::Gui Qt6::SerialPort)
 
 qt_add_executable(coco-thing
     src/main.cpp
@@ -53,6 +57,8 @@ qt_add_executable(coco-thing
     src/screen.h
     src/keymap.cpp
     src/keymap.h
+    src/prefsdialog.cpp
+    src/prefsdialog.h
 )
 target_link_libraries(coco-thing PRIVATE termcore Qt6::Widgets)
 set_target_properties(coco-thing PROPERTIES
@@ -67,3 +73,9 @@ add_test(NAME terminal COMMAND test_terminal)
 add_executable(test_link tests/test_link.cpp)
 target_link_libraries(test_link PRIVATE termcore)
 add_test(NAME link COMMAND test_link)
+
+# Rendering a system font needs a GUI platform; offscreen needs no display.
+add_executable(test_fontface tests/test_fontface.cpp)
+target_link_libraries(test_fontface PRIVATE termcore)
+add_test(NAME fontface COMMAND test_fontface)
+set_tests_properties(fontface PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)

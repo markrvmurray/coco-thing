@@ -5,9 +5,10 @@
  *
  * When the board resets, its USB device goes away and the port's device node
  * vanishes; it comes back under the same name once the board re-enumerates.
- * The link remembers the port it was asked for and, until close() is called,
- * keeps trying to reopen it: after a loss, and also when the port is not
- * there to begin with, so the terminal can be started before the board.
+ * The link remembers the port it was asked for and, until close() is called
+ * (and unless auto-reconnect is turned off), keeps trying to reopen it:
+ * after a loss, and also when the port is not there to begin with, so the
+ * terminal can be started before the board.
  *
  * A loss is noticed two ways: a ResourceError from the port, or the device
  * node disappearing while the port is open (checked on each poll, because a
@@ -45,6 +46,10 @@ public:
 	/* Why the last open attempt or the last loss happened, if it did. */
 	QString lastError() const { return error; }
 
+	/* Whether a lost or absent port is waited for (the default) or the
+	 * link simply closes. */
+	void setAutoReconnect(bool on) { auto_reconnect = on; }
+
 	/* How often a waiting link looks for its port, and an open one checks
 	 * it is still there. */
 	void setPollInterval(int ms) { poll.setInterval(ms); }
@@ -54,7 +59,8 @@ signals:
 	/* The port opened. `again` is true when it had been open before
 	 * under this open() -- that is, the board came back. */
 	void connected(bool again);
-	/* The port went away; the link is now waiting for it. */
+	/* The port went away; the link is now waiting for it, or closed if
+	 * auto-reconnect is off. */
 	void lost();
 	void stateChanged(Link::State st);
 
@@ -67,6 +73,7 @@ private:
 	void tryOpen();
 	void drop(const QString &why);
 	void setState(State s);
+	void giveUp();
 	QString path() const;
 
 	QSerialPort port;
@@ -75,4 +82,5 @@ private:
 	QString error;
 	State st = Closed;
 	bool was_open = false;
+	bool auto_reconnect = true;
 };

@@ -261,6 +261,38 @@ test_loss_seen_by_port_error(const QString &node)
 	board.unplug();
 }
 
+/* With auto-reconnect off, a loss closes the link, and so does opening a
+ * port that is not there. */
+static void
+test_no_auto_reconnect(const QString &node)
+{
+	Board board(node);
+	Link link;
+	Events ev;
+
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	link.setAutoReconnect(false);
+
+	link.open(node);			/* not there yet */
+	CHECK(link.state() == Link::Closed);
+	CHECK(!link.lastError().isEmpty());
+
+	board.plug();
+	link.open(node);
+	CHECK(link.state() == Link::Open);
+
+	board.unplug();
+	CHECK(wait_for([&] { return link.state() == Link::Closed; }));
+	CHECK(ev.losses == 1);
+
+	board.plug();
+	idle(10 * POLL_MS);
+	CHECK(link.state() == Link::Closed);
+	CHECK(ev.connects == 1);
+	board.unplug();
+}
+
 /* A user's Disconnect is final: the board coming back does not reopen it. */
 static void
 test_close_stops_reconnecting(const QString &node)
@@ -302,6 +334,7 @@ main(int argc, char *argv[])
 	test_loss_seen_by_vanished_node(node);
 	test_loss_seen_by_port_error(node);
 	test_close_stops_reconnecting(node);
+	test_no_auto_reconnect(node);
 
 	if (failures == 0)
 		printf("test_link: all passed\n");

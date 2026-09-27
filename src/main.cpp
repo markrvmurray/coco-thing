@@ -17,6 +17,8 @@ main(int argc, char *argv[])
 	// The Control key must reach the guest as Ctrl, not as Command.
 	QApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
 	QApplication app(argc, argv);
+	QApplication::setOrganizationName("coco-thing");
+	QApplication::setApplicationName("coco-thing");
 
 	const QStringList args = QApplication::arguments();
 	MainWindow w(args.size() > 1 ? args[1] : QString());

@@ -18,6 +18,10 @@ public:
 
 	QSize sizeHint() const override;
 
+	/* Integer: scale by whole multiples only, so every pixel is the same
+	 * size. Smooth: filter when the scale is not a whole multiple. */
+	void setScaling(bool integer, bool smooth);
+
 signals:
 	void keyBytes(const QByteArray &bytes);
 
@@ -28,4 +32,6 @@ protected:
 
 private:
 	QImage image;
+	bool integer = false;
+	bool smooth = true;
 };

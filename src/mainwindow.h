@@ -12,6 +12,7 @@
 #include <QTimer>
 
 #include "link.h"
+#include "prefs.h"
 #include "screen.h"
 #include "terminal.h"
 
@@ -21,8 +22,12 @@ class MainWindow : public QMainWindow {
 public:
 	explicit MainWindow(const QString &port_name, QWidget *parent = nullptr);
 
+protected:
+	void closeEvent(QCloseEvent *ev) override;
+
 private slots:
 	void choosePort();
+	void editPrefs();
 	void disconnectPort();
 	void resetScreen();
 	void linkConnected(bool again);
@@ -32,10 +37,12 @@ private slots:
 
 private:
 	void showState();
+	void applyPrefs();
 
 	Screen *screen;
 	Terminal terminal;
 	Link link;
 	QTimer timer;
 	QLabel *state;
+	Prefs prefs;
 };

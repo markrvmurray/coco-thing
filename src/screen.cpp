@@ -44,6 +44,14 @@ Screen::sizeHint() const
 }
 
 void
+Screen::setScaling(bool i, bool s)
+{
+	integer = i;
+	smooth = s;
+	update();
+}
+
+void
 Screen::paintEvent(QPaintEvent *)
 {
 	QPainter p(this);
@@ -51,10 +59,14 @@ Screen::paintEvent(QPaintEvent *)
 	p.fillRect(rect(), Qt::black);
 
 	QSize fit = image.size().scaled(size(), Qt::KeepAspectRatio);
+	const int whole = qMin(width() / FB_WIDTH, height() / FB_HEIGHT);
+	if (integer && whole >= 1)
+		fit = image.size() * whole;
+
 	QRect target(QPoint((width() - fit.width()) / 2,
 	    (height() - fit.height()) / 2), fit);
 	p.setRenderHint(QPainter::SmoothPixmapTransform,
-	    fit.width() % FB_WIDTH != 0);
+	    smooth && fit.width() % FB_WIDTH != 0);
 	p.drawImage(target, image);
 }
 

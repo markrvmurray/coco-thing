@@ -31,15 +31,22 @@ public:
 	/* Advance the blink clock by one frame; on the board this is vsync. */
 	void frame();
 
-	/* Power-on state: cleared screen, link up, backlog discarded. */
+	/* Power-on state: cleared screen, link up, backlog discarded. The
+	 * chosen face (below) survives it. */
 	void reset();
+
+	/* Draw text with `face` (the layout in fontface.h); empty for the
+	 * firmware's built-in face. What is on screen is redrawn with it. */
+	void setFace(const QByteArray &face);
 
 	/* Bytes received but not yet accepted by the command FIFO. */
 	qsizetype backlog() const { return pending.size() - pending_pos; }
 
 private:
 	bool fill_fifo();
+	void applyFace();
 
 	QByteArray pending;
 	qsizetype pending_pos = 0;
+	QByteArray face;	/* the renderer points into this */
 };

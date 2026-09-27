@@ -34,8 +34,20 @@ Link::open(const QString &name)
 	was_open = false;
 	poll.start();
 	tryOpen();
-	if (st == Closed)
-		setState(Waiting);
+	if (st != Open) {
+		if (auto_reconnect)
+			setState(Waiting);
+		else
+			giveUp();
+	}
+}
+
+/* Stop trying, but keep the name, so the port can be reported. */
+void
+Link::giveUp()
+{
+	poll.stop();
+	setState(Closed);
 }
 
 void
@@ -59,8 +71,10 @@ Link::write(const QByteArray &bytes)
 void
 Link::tryOpen()
 {
-	if (!QFile::exists(path()))
+	if (!QFile::exists(path())) {
+		error = "no such device";
 		return;
+	}
 
 	// A CDC ACM port ignores the line settings, so the defaults stand.
 	port.setPortName(path());
@@ -85,7 +99,10 @@ Link::drop(const QString &why)
 		return;
 	error = why;
 	port.close();
-	setState(Waiting);
+	if (auto_reconnect)
+		setState(Waiting);
+	else
+		giveUp();
 	emit lost();
 }
 

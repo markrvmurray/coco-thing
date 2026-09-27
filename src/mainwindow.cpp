@@ -6,10 +6,14 @@
 
 #include "mainwindow.h"
 
+#include <QCloseEvent>
 #include <QInputDialog>
 #include <QMenuBar>
 #include <QSerialPortInfo>
+#include <QSettings>
 #include <QStatusBar>
+
+#include "prefsdialog.h"
 
 /* One frame at the board's ~60 Hz, and the share of it the firmware may
  * spend interpreting before the paint. */
@@ -46,6 +50,11 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	conn->addSeparator();
 	conn->addAction("&Reset Screen", shortcut(Qt::Key_R), this,
 	    &MainWindow::resetScreen);
+	conn->addSeparator();
+	// On macOS the role moves this into the application menu.
+	QAction *prefs_action = conn->addAction("&Preferences…",
+	    shortcut(Qt::Key_Comma), this, &MainWindow::editPrefs);
+	prefs_action->setMenuRole(QAction::PreferencesRole);
 
 	state = new QLabel(this);
 	statusBar()->addPermanentWidget(state, 1);
@@ -57,9 +66,55 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	connect(&timer, &QTimer::timeout, this, &MainWindow::tick);
 	timer.start(FRAME_MS);
 
-	if (!port_name.isEmpty())
-		link.open(port_name);
+	QSettings settings;
+	restoreGeometry(settings.value("window/geometry").toByteArray());
+
+	prefs = Prefs::load();
+	applyPrefs();
+
+	QString name = port_name;
+	if (name.isEmpty() && prefs.connect_at_start)
+		name = settings.value("connection/last_port").toString();
+	if (!name.isEmpty())
+		link.open(name);
 	showState();
+}
+
+void
+MainWindow::closeEvent(QCloseEvent *ev)
+{
+	QSettings().setValue("window/geometry", saveGeometry());
+	QMainWindow::closeEvent(ev);
+}
+
+void
+MainWindow::editPrefs()
+{
+	PrefsDialog dialog(prefs, this);
+
+	if (dialog.exec() != QDialog::Accepted)
+		return;
+	prefs = dialog.prefs();
+	prefs.save();
+	applyPrefs();
+}
+
+void
+MainWindow::applyPrefs()
+{
+	QString error;
+	const QByteArray face = prefs.face(&error);
+
+	// A font file that has gone away falls back to the built-in face
+	// rather than leaving the screen blank.
+	if (!error.isEmpty())
+		statusBar()->showMessage(QString("Font: %1; using the built-in "
+		    "face").arg(error));
+	terminal.setFace(face);
+
+	screen->setScaling(prefs.scaling == Prefs::ScaleInteger, prefs.smooth);
+	link.setAutoReconnect(prefs.auto_reconnect);
+	screen->update();
 }
 
 void
@@ -84,8 +139,12 @@ MainWindow::choosePort()
 	bool ok = false;
 	const QString name = QInputDialog::getItem(this, "Connect",
 	    "Serial port:", names, preferred, false, &ok);
-	if (ok)
-		link.open(name);
+	if (!ok)
+		return;
+	link.open(name);
+	if (link.state() == Link::Closed)
+		statusBar()->showMessage(QString("Cannot open %1: %2")
+		    .arg(name, link.lastError()));
 }
 
 void
@@ -104,10 +163,12 @@ MainWindow::resetScreen()
 void
 MainWindow::linkConnected(bool again)
 {
+	QSettings().setValue("connection/last_port", link.portName());
+
 	// The board came back from a reset. The video Pico clears its
-	// console on the host's !RESET, so this one does too, and anything
-	// still queued from before the reset is stale.
-	if (again)
+	// console on the host's !RESET, so this one does too by default, and
+	// anything still queued from before the reset is stale.
+	if (again && prefs.clear_on_reconnect)
 		resetScreen();
 	statusBar()->clearMessage();
 }
@@ -116,8 +177,10 @@ void
 MainWindow::linkLost()
 {
 	// The screen is left as it was, so the last output stays readable.
-	statusBar()->showMessage(QString("%1 lost (%2); waiting for it")
-	    .arg(link.portName(), link.lastError()));
+	statusBar()->showMessage(link.state() == Link::Waiting
+	    ? QString("%1 lost (%2); waiting for it")
+	      .arg(link.portName(), link.lastError())
+	    : QString("%1 lost (%2)").arg(link.portName(), link.lastError()));
 }
 
 void

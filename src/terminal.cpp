@@ -15,6 +15,11 @@
 // include directory.
 #include <registers.h>
 
+/* The renderer's face pointer (video_render.cpp). Defined with external
+ * linkage there but declared in no header, since on the board only the
+ * guest's Font command sets it. NULL selects the built-in face. */
+void vidterm_set_font(const uint8_t *data, uint32_t len);
+
 Terminal::Terminal(QObject *parent)
 	: QObject(parent)
 {
@@ -32,6 +37,39 @@ Terminal::reset()
 	vid_link_init();
 	pending.clear();
 	pending_pos = 0;
+
+	// The link hands its console reset to the render side, which carries
+	// it out on the next pass and selects the built-in face. Run that pass
+	// now (the FIFO is empty, so it does nothing else), then put the
+	// chosen face back.
+	vid_link_render();
+	applyFace();
+}
+
+void
+Terminal::setFace(const QByteArray &f)
+{
+	face = f;
+	applyFace();
+
+	// Rewrite every text row unchanged: that marks each cell dirty, so the
+	// next refresh draws the screen's text again in the new face.
+	uint8_t row[TEXT_COLS * 2];
+	for (int r = 0; r < TEXT_ROWS; r++) {
+		vidterm_read_row(0, r, TEXT_COLS, row);
+		vidterm_write_row(0, r, TEXT_COLS, row);
+	}
+	vidterm_refresh();
+}
+
+void
+Terminal::applyFace()
+{
+	if (face.isEmpty())
+		vidterm_set_font(nullptr, 0);
+	else
+		vidterm_set_font(reinterpret_cast<const uint8_t *>(
+		    face.constData()), (uint32_t)face.size());
 }
 
 void
