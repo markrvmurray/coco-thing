@@ -34,13 +34,16 @@ target_include_directories(pvcore PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/shim
 )
 
-# The serial side's model of the guest, shared by the app and the tests.
+# The serial side's model of the guest and the link to the board, shared by
+# the app and the tests.
 add_library(termcore STATIC
     src/terminal.cpp
     src/terminal.h
+    src/link.cpp
+    src/link.h
 )
 target_include_directories(termcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(termcore PUBLIC pvcore Qt6::Core)
+target_link_libraries(termcore PUBLIC pvcore Qt6::Core Qt6::SerialPort)
 
 qt_add_executable(coco-thing
     src/main.cpp
@@ -51,7 +54,7 @@ qt_add_executable(coco-thing
     src/keymap.cpp
     src/keymap.h
 )
-target_link_libraries(coco-thing PRIVATE termcore Qt6::Widgets Qt6::SerialPort)
+target_link_libraries(coco-thing PRIVATE termcore Qt6::Widgets)
 set_target_properties(coco-thing PROPERTIES
     MACOSX_BUNDLE ON
 )
@@ -60,3 +63,7 @@ enable_testing()
 add_executable(test_terminal tests/test_terminal.cpp)
 target_link_libraries(test_terminal PRIVATE termcore)
 add_test(NAME terminal COMMAND test_terminal)
+
+add_executable(test_link tests/test_link.cpp)
+target_link_libraries(test_link PRIVATE termcore)
+add_test(NAME link COMMAND test_link)

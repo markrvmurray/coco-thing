@@ -25,46 +25,26 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	setCentralWidget(screen);
 	connect(screen, &Screen::keyBytes, this, &MainWindow::sendKeys);
 
-	QMenu *link = menuBar()->addMenu("&Connection");
-	link->addAction("&Connect…", QKeySequence("Ctrl+K"), this,
+	QMenu *conn = menuBar()->addMenu("&Connection");
+	conn->addAction("&Connect…", QKeySequence("Ctrl+K"), this,
 	    &MainWindow::choosePort);
-	link->addAction("&Disconnect", this, &MainWindow::disconnectPort);
-	link->addSeparator();
-	link->addAction("&Reset Screen", QKeySequence("Ctrl+R"), this,
+	conn->addAction("&Disconnect", this, &MainWindow::disconnectPort);
+	conn->addSeparator();
+	conn->addAction("&Reset Screen", QKeySequence("Ctrl+R"), this,
 	    &MainWindow::resetScreen);
 
 	state = new QLabel(this);
 	statusBar()->addPermanentWidget(state, 1);
 
-	connect(&serial, &QSerialPort::readyRead, this,
-	    &MainWindow::readSerial);
-	connect(&serial, &QSerialPort::errorOccurred, this,
-	    &MainWindow::serialError);
+	connect(&link, &Link::received, &terminal, &Terminal::feed);
+	connect(&link, &Link::connected, this, &MainWindow::linkConnected);
+	connect(&link, &Link::lost, this, &MainWindow::linkLost);
+	connect(&link, &Link::stateChanged, this, &MainWindow::showState);
 	connect(&timer, &QTimer::timeout, this, &MainWindow::tick);
 	timer.start(FRAME_MS);
 
 	if (!port_name.isEmpty())
-		openPort(port_name);
-	showState();
-}
-
-void
-MainWindow::openPort(const QString &name)
-{
-	if (serial.isOpen())
-		serial.close();
-
-	// A CDC ACM port ignores the line settings, so the defaults stand.
-	serial.setPortName(name);
-	if (!serial.open(QIODevice::ReadWrite)) {
-		statusBar()->showMessage(QString("Cannot open %1: %2")
-		    .arg(name, serial.errorString()));
-		showState();
-		return;
-	}
-	// Some CDC firmware holds its output until the host asserts DTR.
-	serial.setDataTerminalReady(true);
-	statusBar()->clearMessage();
+		link.open(port_name);
 	showState();
 }
 
@@ -91,14 +71,13 @@ MainWindow::choosePort()
 	const QString name = QInputDialog::getItem(this, "Connect",
 	    "Serial port:", names, preferred, false, &ok);
 	if (ok)
-		openPort(name);
+		link.open(name);
 }
 
 void
 MainWindow::disconnectPort()
 {
-	serial.close();
-	showState();
+	link.close();
 }
 
 void
@@ -109,29 +88,28 @@ MainWindow::resetScreen()
 }
 
 void
-MainWindow::readSerial()
+MainWindow::linkConnected(bool again)
 {
-	terminal.feed(serial.readAll());
+	// The board came back from a reset. The video Pico clears its
+	// console on the host's !RESET, so this one does too, and anything
+	// still queued from before the reset is stale.
+	if (again)
+		resetScreen();
+	statusBar()->clearMessage();
 }
 
 void
-MainWindow::serialError(QSerialPort::SerialPortError error)
+MainWindow::linkLost()
 {
-	if (error == QSerialPort::NoError)
-		return;
-	statusBar()->showMessage(QString("%1: %2")
-	    .arg(serial.portName(), serial.errorString()));
-	// The board unplugged or reset: the device node has gone.
-	if (error == QSerialPort::ResourceError)
-		serial.close();
-	showState();
+	// The screen is left as it was, so the last output stays readable.
+	statusBar()->showMessage(QString("%1 lost (%2); waiting for it")
+	    .arg(link.portName(), link.lastError()));
 }
 
 void
 MainWindow::sendKeys(const QByteArray &bytes)
 {
-	if (serial.isOpen())
-		serial.write(bytes);
+	link.write(bytes);
 }
 
 void
@@ -146,9 +124,19 @@ MainWindow::tick()
 void
 MainWindow::showState()
 {
-	QString s = serial.isOpen()
-	    ? QString("Connected: %1").arg(serial.portName())
-	    : QString("Not connected");
+	QString s;
+
+	switch (link.state()) {
+	case Link::Closed:
+		s = "Not connected";
+		break;
+	case Link::Waiting:
+		s = QString("Waiting for %1").arg(link.portName());
+		break;
+	case Link::Open:
+		s = QString("Connected: %1").arg(link.portName());
+		break;
+	}
 	if (terminal.backlog() > 0)
 		s += QString("   backlog %1 B").arg(terminal.backlog());
 	state->setText(s);

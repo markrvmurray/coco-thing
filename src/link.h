@@ -1,0 +1,78 @@
+/*
+ * link.h
+ *
+ * The serial link to the board's USB CDC console, kept up across resets.
+ *
+ * When the board resets, its USB device goes away and the port's device node
+ * vanishes; it comes back under the same name once the board re-enumerates.
+ * The link remembers the port it was asked for and, until close() is called,
+ * keeps trying to reopen it: after a loss, and also when the port is not
+ * there to begin with, so the terminal can be started before the board.
+ *
+ * A loss is noticed two ways: a ResourceError from the port, or the device
+ * node disappearing while the port is open (checked on each poll, because a
+ * port with nothing to read may not report the error until it is written).
+ */
+
+#pragma once
+
+#include <QByteArray>
+#include <QObject>
+#include <QSerialPort>
+#include <QString>
+#include <QTimer>
+
+class Link : public QObject {
+	Q_OBJECT
+
+public:
+	enum State {
+		Closed,		/* no port wanted */
+		Waiting,	/* wanted, not open: polling for it */
+		Open,
+	};
+
+	explicit Link(QObject *parent = nullptr);
+
+	/* Connect to `name` (e.g. cu.usbmodem1101, or an absolute path) and
+	 * keep it connected until close(). */
+	void open(const QString &name);
+	void close();
+	void write(const QByteArray &bytes);
+
+	State state() const { return st; }
+	QString portName() const { return wanted; }
+	/* Why the last open attempt or the last loss happened, if it did. */
+	QString lastError() const { return error; }
+
+	/* How often a waiting link looks for its port, and an open one checks
+	 * it is still there. */
+	void setPollInterval(int ms) { poll.setInterval(ms); }
+
+signals:
+	void received(const QByteArray &bytes);
+	/* The port opened. `again` is true when it had been open before
+	 * under this open() -- that is, the board came back. */
+	void connected(bool again);
+	/* The port went away; the link is now waiting for it. */
+	void lost();
+	void stateChanged(Link::State st);
+
+private slots:
+	void readPort();
+	void portError(QSerialPort::SerialPortError e);
+	void check();
+
+private:
+	void tryOpen();
+	void drop(const QString &why);
+	void setState(State s);
+	QString path() const;
+
+	QSerialPort port;
+	QTimer poll;
+	QString wanted;
+	QString error;
+	State st = Closed;
+	bool was_open = false;
+};

@@ -1,17 +1,17 @@
 /*
  * mainwindow.h
  *
- * The window: the screen, the serial link to the board's USB CDC console,
- * and the frame timer that runs the firmware and repaints.
+ * The window: the screen, the link to the board's USB CDC console, and the
+ * frame timer that runs the firmware and repaints.
  */
 
 #pragma once
 
 #include <QLabel>
 #include <QMainWindow>
-#include <QSerialPort>
 #include <QTimer>
 
+#include "link.h"
 #include "screen.h"
 #include "terminal.h"
 
@@ -25,18 +25,17 @@ private slots:
 	void choosePort();
 	void disconnectPort();
 	void resetScreen();
-	void readSerial();
-	void serialError(QSerialPort::SerialPortError error);
+	void linkConnected(bool again);
+	void linkLost();
 	void sendKeys(const QByteArray &bytes);
 	void tick();
 
 private:
-	void openPort(const QString &name);
 	void showState();
 
 	Screen *screen;
 	Terminal terminal;
-	QSerialPort serial;
+	Link link;
 	QTimer timer;
 	QLabel *state;
 };
