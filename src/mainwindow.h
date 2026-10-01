@@ -37,6 +37,10 @@ private slots:
 	void linkLost();
 	void sendKeys();
 	void tick();
+	void copy();
+	void cut();
+	void paste();
+	void selectAll();
 
 private:
 	void showState();
@@ -50,4 +54,5 @@ private:
 	QTimer timer;
 	QLabel *state;
 	Prefs prefs;
+	QByteArray pasting;	/* pasted bytes still to send */
 };

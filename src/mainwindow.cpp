@@ -7,6 +7,7 @@
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QInputDialog>
 #include <QMenuBar>
@@ -16,11 +17,20 @@
 
 #include "fw_platform.h"
 #include "prefsdialog.h"
+#include "screentext.h"
 
 /* One frame at the board's ~60 Hz, and the share of it the firmware may
  * spend interpreting before the paint. */
 static const int FRAME_MS = 16;
 static const int PUMP_BUDGET_MS = 10;
+
+/* Pasted bytes sent each frame: about 1000 a second. USB CDC would deliver a
+ * paste all at once, but the board's ACIA driver (sc6850) has a receive
+ * buffer of under a page and no flow control on this link, so a large paste
+ * arriving faster than the program reading it would overrun the buffer and
+ * lose characters without a word. This is faster than anyone types and slow
+ * enough for the shell and editors to keep up. */
+static const int PASTE_PER_FRAME = 16;
 
 /* A menu shortcut that leaves every Ctrl chord to the guest. main() keeps
  * Qt from swapping Control and Command on macOS, so there "Ctrl" in a key
@@ -60,6 +70,18 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	QAction *prefs_action = conn->addAction("&Preferences…",
 	    shortcut(Qt::Key_Comma), this, &MainWindow::editPrefs);
 	prefs_action->setMenuRole(QAction::PreferencesRole);
+
+	// The board's screen cannot be edited from here, so Cut copies.
+	QMenu *edit = menuBar()->addMenu("&Edit");
+	edit->addAction("Cu&t", shortcut(Qt::Key_X), this, &MainWindow::cut);
+	edit->addAction("&Copy", shortcut(Qt::Key_C), this, &MainWindow::copy);
+	edit->addAction("&Paste", shortcut(Qt::Key_V), this,
+	    &MainWindow::paste);
+	edit->addSeparator();
+	edit->addAction("Select &All", shortcut(Qt::Key_A), this,
+	    &MainWindow::selectAll);
+	// Selecting copies, as the pasteboard's "primary selection".
+	connect(screen, &Screen::selectionMade, this, &MainWindow::copy);
 
 	state = new QLabel(this);
 	statusBar()->addPermanentWidget(state, 1);
@@ -179,6 +201,7 @@ MainWindow::disconnectPort()
 void
 MainWindow::resetScreen()
 {
+	screen->clearSelection();
 	terminal.reset();
 	screen->update();
 }
@@ -219,10 +242,46 @@ MainWindow::tick()
 {
 	keyboard.tick((uint32_t)clock.elapsed());
 	sendKeys();
+	if (!pasting.isEmpty()) {
+		if (link.state() == Link::Open)
+			link.write(pasting.left(PASTE_PER_FRAME));
+		pasting.remove(0, PASTE_PER_FRAME);
+	}
 	terminal.pump(PUMP_BUDGET_MS);
 	terminal.frame();
 	screen->update();
 	showState();
+}
+
+void
+MainWindow::copy()
+{
+	if (screen->hasSelection())
+		QApplication::clipboard()->setText(screen->selectedText());
+}
+
+void
+MainWindow::cut()
+{
+	copy();
+	screen->clearSelection();
+}
+
+void
+MainWindow::paste()
+{
+	if (link.state() != Link::Open) {
+		statusBar()->showMessage("Not connected: nothing pasted");
+		return;
+	}
+	pasting += screentext_paste(QApplication::clipboard()->text());
+}
+
+void
+MainWindow::selectAll()
+{
+	screen->selectAll();
+	copy();
 }
 
 void
@@ -243,5 +302,7 @@ MainWindow::showState()
 	}
 	if (terminal.backlog() > 0)
 		s += QString("   backlog %1 B").arg(terminal.backlog());
+	if (!pasting.isEmpty())
+		s += QString("   pasting %1 B").arg(pasting.size());
 	state->setText(s);
 }

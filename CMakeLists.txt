@@ -50,6 +50,8 @@ add_library(termcore STATIC
     src/keyboard.h
     src/mackeys.cpp
     src/mackeys.h
+    src/screentext.cpp
+    src/screentext.h
 )
 target_include_directories(termcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(termcore PUBLIC pvcore Qt6::Gui Qt6::SerialPort)
@@ -109,3 +111,7 @@ add_executable(test_mainwindow tests/test_mainwindow.cpp src/mainwindow.cpp
 target_link_libraries(test_mainwindow PRIVATE termcore Qt6::Widgets)
 add_test(NAME mainwindow COMMAND test_mainwindow)
 set_tests_properties(mainwindow PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+add_executable(test_screentext tests/test_screentext.cpp)
+target_link_libraries(test_screentext PRIVATE termcore)
+add_test(NAME screentext COMMAND test_screentext)
