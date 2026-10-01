@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "fw_platform.h"
 #include "terminal.h"
 #include "video.h"
 #include "video_render.h"
@@ -213,6 +214,19 @@ test_text_area_wraps_like_minted(Terminal &t)
 	settle(t);
 }
 
+static int bells;
+
+/* The console bell ($07) from the board rings the platform's bell once. */
+static void
+test_bell(Terminal &t)
+{
+	fw_platform_set_bell([] { bells++; });
+	t.feed(QByteArray("A\x07" "B", 3));
+	settle(t);
+	CHECK(bells == 1);
+	fw_platform_set_bell(nullptr);
+}
+
 int
 main()
 {
@@ -223,6 +237,7 @@ main()
 	test_bar(t);
 	test_face(t);
 	test_text_area_wraps_like_minted(t);
+	test_bell(t);
 
 	if (failures == 0)
 		printf("test_terminal: all passed\n");

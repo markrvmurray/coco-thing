@@ -6,6 +6,7 @@
 
 #include "mainwindow.h"
 
+#include <QApplication>
 #include <QCloseEvent>
 #include <QInputDialog>
 #include <QMenuBar>
@@ -13,6 +14,7 @@
 #include <QSettings>
 #include <QStatusBar>
 
+#include "fw_platform.h"
 #include "prefsdialog.h"
 
 /* One frame at the board's ~60 Hz, and the share of it the firmware may
@@ -42,6 +44,7 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	screen = new Screen(this);
 	setCentralWidget(screen);
 	connect(screen, &Screen::keyBytes, this, &MainWindow::sendKeys);
+	fw_platform_set_bell([] { QApplication::beep(); });
 
 	QMenu *conn = menuBar()->addMenu("&Connection");
 	conn->addAction("&Connect…", shortcut(Qt::Key_K), this,
