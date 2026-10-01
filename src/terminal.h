@@ -50,6 +50,12 @@ public:
 	 * firmware's built-in face. What is on screen is redrawn with it. */
 	void setFace(const QByteArray &face);
 
+	/* Everything waiting in the firmware's input FIFO -- the keyboard's
+	 * cooked bytes -- read out as the 6809 reads it on the DVI console:
+	 * VID.Stat checked for the protocol version and RDRF, then VID.Data,
+	 * whose read pops the FIFO. */
+	QByteArray takeInput();
+
 	/* Bytes received but not yet accepted by the command FIFO. */
 	qsizetype backlog() const { return pending.size() - pending_pos; }
 

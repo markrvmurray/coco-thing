@@ -169,6 +169,27 @@ Terminal::pump(int budget_ms)
 	return worked;
 }
 
+QByteArray
+Terminal::takeInput()
+{
+	QByteArray out;
+
+	for (;;) {
+		uint8_t stat, data;
+
+		vid_link_stage();
+		registers::copy_out(&stat, VID_STAT_OFFSET, 1);
+		if (((stat >> VID_STAT_VER_LSB) & 7u) != VID_STAT_VERSION ||
+		    (stat & VID_STAT_RDRF) == 0)
+			break;
+		// Serve, then pop: the bus-read ISR's order.
+		registers::copy_out(&data, VID_DATA_OFFSET, 1);
+		vid_link_guest_read(VID_DATA_OFFSET);
+		out.append((char)data);
+	}
+	return out;
+}
+
 void
 Terminal::frame()
 {

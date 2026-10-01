@@ -9,7 +9,7 @@
 #include <QKeyEvent>
 #include <QPainter>
 
-#include "keymap.h"
+#include "keyboard.h"
 #include "video.h"
 #include "video_render.h"
 
@@ -93,13 +93,33 @@ Screen::paintEvent(QPaintEvent *)
 void
 Screen::keyPressEvent(QKeyEvent *ev)
 {
-	const QByteArray bytes = keymap_translate(ev);
-
-	if (bytes.isEmpty()) {
+	if (keyboard == nullptr || !keyboard->press(ev)) {
 		QWidget::keyPressEvent(ev);
 		return;
 	}
-	emit keyBytes(bytes);
+	emit keysTyped();
+}
+
+void
+Screen::keyReleaseEvent(QKeyEvent *ev)
+{
+	if (keyboard == nullptr || !keyboard->release(ev)) {
+		QWidget::keyReleaseEvent(ev);
+		return;
+	}
+	emit keysTyped();
+}
+
+void
+Screen::focusOutEvent(QFocusEvent *ev)
+{
+	// Keys released while another window has the keyboard never reach
+	// us; let go of them all now so none keeps repeating.
+	if (keyboard != nullptr) {
+		keyboard->releaseAll();
+		emit keysTyped();
+	}
+	QWidget::focusOutEvent(ev);
 }
 
 bool

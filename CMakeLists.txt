@@ -26,6 +26,7 @@ add_library(pvcore STATIC
     ${PICOVIDEO}/src/vid_link.cpp
     ${PICOVIDEO}/src/vid_console.cpp
     ${PICOVIDEO}/src/registers.cpp
+    ${PICOVIDEO}/src/hid_cook.cpp
     src/fw_stores.cpp
     src/fw_platform.cpp
 )
@@ -45,9 +46,24 @@ add_library(termcore STATIC
     src/fontface.h
     src/prefs.cpp
     src/prefs.h
+    src/keyboard.cpp
+    src/keyboard.h
+    src/mackeys.cpp
+    src/mackeys.h
 )
 target_include_directories(termcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(termcore PUBLIC pvcore Qt6::Gui Qt6::SerialPort)
+
+# Keys go to the firmware's HID cooker by physical position, which needs a
+# table from the platform's key codes to USB usages. Only macOS has one
+# (src/mackeys.cpp); its keyboard-shape query is in Carbon.
+if(APPLE)
+    find_library(CARBON Carbon REQUIRED)
+    target_link_libraries(termcore PUBLIC ${CARBON})
+else()
+    message(FATAL_ERROR "no physical key table for this platform: add one "
+        "beside src/mackeys.cpp")
+endif()
 
 qt_add_executable(coco-thing
     src/main.cpp
@@ -55,8 +71,6 @@ qt_add_executable(coco-thing
     src/mainwindow.h
     src/screen.cpp
     src/screen.h
-    src/keymap.cpp
-    src/keymap.h
     src/prefsdialog.cpp
     src/prefsdialog.h
 )
@@ -80,7 +94,18 @@ target_link_libraries(test_fontface PRIVATE termcore)
 add_test(NAME fontface COMMAND test_fontface)
 set_tests_properties(fontface PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
-add_executable(test_screen tests/test_screen.cpp src/screen.cpp src/keymap.cpp)
+add_executable(test_screen tests/test_screen.cpp src/screen.cpp)
 target_link_libraries(test_screen PRIVATE termcore Qt6::Widgets)
 add_test(NAME screen COMMAND test_screen)
 set_tests_properties(screen PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+add_executable(test_keyboard tests/test_keyboard.cpp)
+target_link_libraries(test_keyboard PRIVATE termcore)
+add_test(NAME keyboard COMMAND test_keyboard)
+set_tests_properties(keyboard PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+add_executable(test_mainwindow tests/test_mainwindow.cpp src/mainwindow.cpp
+    src/screen.cpp src/prefsdialog.cpp)
+target_link_libraries(test_mainwindow PRIVATE termcore Qt6::Widgets)
+add_test(NAME mainwindow COMMAND test_mainwindow)
+set_tests_properties(mainwindow PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)

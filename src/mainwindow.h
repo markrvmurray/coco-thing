@@ -7,10 +7,12 @@
 
 #pragma once
 
+#include <QElapsedTimer>
 #include <QLabel>
 #include <QMainWindow>
 #include <QTimer>
 
+#include "keyboard.h"
 #include "link.h"
 #include "prefs.h"
 #include "screen.h"
@@ -21,6 +23,7 @@ class MainWindow : public QMainWindow {
 
 public:
 	explicit MainWindow(const QString &port_name, QWidget *parent = nullptr);
+	~MainWindow() override;
 
 protected:
 	void closeEvent(QCloseEvent *ev) override;
@@ -32,7 +35,7 @@ private slots:
 	void resetScreen();
 	void linkConnected(bool again);
 	void linkLost();
-	void sendKeys(const QByteArray &bytes);
+	void sendKeys();
 	void tick();
 
 private:
@@ -42,6 +45,8 @@ private:
 	Screen *screen;
 	Terminal terminal;
 	Link link;
+	Keyboard keyboard;
+	QElapsedTimer clock;	/* the keyboard's repeat clock */
 	QTimer timer;
 	QLabel *state;
 	Prefs prefs;

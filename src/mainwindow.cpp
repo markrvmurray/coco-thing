@@ -43,8 +43,10 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 
 	screen = new Screen(this);
 	setCentralWidget(screen);
-	connect(screen, &Screen::keyBytes, this, &MainWindow::sendKeys);
+	screen->setKeyboard(&keyboard);
 	fw_platform_set_bell([] { QApplication::beep(); });
+	connect(screen, &Screen::keysTyped, this, &MainWindow::sendKeys);
+	clock.start();
 
 	QMenu *conn = menuBar()->addMenu("&Connection");
 	conn->addAction("&Connect…", shortcut(Qt::Key_K), this,
@@ -81,6 +83,16 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	if (!name.isEmpty())
 		link.open(name);
 	showState();
+}
+
+MainWindow::~MainWindow()
+{
+	// The members (the link, the keyboard, the terminal) are destroyed
+	// before ~QWidget hides the child widgets, and hiding the screen takes
+	// its focus, which releases the keys and signals sendKeys(). Cut the
+	// screen loose first, so nothing reaches a member that has gone.
+	screen->setKeyboard(nullptr);
+	disconnect(screen, nullptr, this, nullptr);
 }
 
 void
@@ -195,14 +207,18 @@ MainWindow::linkLost()
 }
 
 void
-MainWindow::sendKeys(const QByteArray &bytes)
+MainWindow::sendKeys()
 {
-	link.write(bytes);
+	// Read out even when nothing is connected, so keys typed then are
+	// dropped rather than sent later.
+	link.write(terminal.takeInput());
 }
 
 void
 MainWindow::tick()
 {
+	keyboard.tick((uint32_t)clock.elapsed());
+	sendKeys();
 	terminal.pump(PUMP_BUDGET_MS);
 	terminal.frame();
 	screen->update();
