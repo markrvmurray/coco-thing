@@ -6,6 +6,12 @@
  * mouse selects text in the text area, as in any terminal: a drag selects
  * from cell to cell, running to the end of each row between, and a
  * double-click selects the word under the pointer.
+ *
+ * The view can be scrolled back into the Terminal's history (the wheel or
+ * trackpad, or scrollBy()). History rows are drawn from the pixels kept when
+ * they scrolled off; the view stays on the same lines while new output
+ * arrives, until it is scrolled back to the bottom. Selections are held in
+ * the Terminal's absolute line numbers, so they stay on their text too.
  */
 
 #pragma once
@@ -14,6 +20,7 @@
 #include <QWidget>
 
 class Keyboard;
+class Terminal;
 
 class Screen : public QWidget {
 	Q_OBJECT
@@ -34,6 +41,18 @@ public:
 	 * panel is out of use and shown grey. */
 	void setTextArea(int cols, int rows);
 
+	/* Where scroll-back and the text of lines come from. */
+	void setTerminal(Terminal *t);
+
+	/* Lines the view is scrolled back from the live screen: 0 is live. */
+	qint64 scrolledBack() const;
+	/* Scroll back (positive) or forward, clamped to the history. */
+	void scrollBy(qint64 lines);
+	void scrollToBottom();
+	void scrollToTop();
+	/* Rows in the text area: a page. */
+	int pageRows() const;
+
 	/* Where key presses and releases go. */
 	void setKeyboard(Keyboard *k) { keyboard = k; }
 
@@ -50,6 +69,9 @@ signals:
 	/* A drag or double-click finished with text selected. */
 	void selectionMade();
 
+	/* The view scrolled, or the history it scrolls through changed. */
+	void viewChanged();
+
 protected:
 	void paintEvent(QPaintEvent *ev) override;
 	void keyPressEvent(QKeyEvent *ev) override;
@@ -60,6 +82,7 @@ protected:
 	void mouseMoveEvent(QMouseEvent *ev) override;
 	void mouseReleaseEvent(QMouseEvent *ev) override;
 	void mouseDoubleClickEvent(QMouseEvent *ev) override;
+	void wheelEvent(QWheelEvent *ev) override;
 
 private:
 	QImage image;
@@ -68,14 +91,33 @@ private:
 	QSize area;		/* in panel pixels */
 	Keyboard *keyboard = nullptr;
 
+	/* A cell: its column and the Terminal's absolute line number. */
+	struct Pos {
+		int col = 0;
+		qint64 line = 0;
+		bool operator==(const Pos &o) const
+		{ return col == o.col && line == o.line; }
+		bool operator!=(const Pos &o) const { return !(*this == o); }
+	};
+
 	/* Where the panel is drawn in the widget, and the text-area cell under
 	 * a widget position (clamped into the area). */
 	QRect panelRect() const;
-	QPoint cellAt(const QPointF &pos) const;
+	Pos cellAt(const QPointF &pos) const;
 	/* The selection's ends in reading order. */
-	void ordered(QPoint &from, QPoint &to) const;
+	void ordered(Pos &from, Pos &to) const;
+	/* The absolute line at the top of the view, after taking in any lines
+	 * that have scrolled off since last asked. */
+	qint64 topLine() const;
+	int areaCols() const;
+	int areaRows() const;
+
+	Terminal *term = nullptr;
+	mutable qint64 back = 0;	/* lines scrolled back */
+	mutable qint64 seen = 0;	/* linesScrolled() when last taken in */
+	qreal wheel_rest = 0;		/* part of a line the wheel has moved */
 
 	bool selected = false;	/* anchor..head is a selection */
 	bool dragging = false;
-	QPoint anchor, head;	/* cells: x = column, y = row */
+	Pos anchor, head;
 };

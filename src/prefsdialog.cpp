@@ -160,12 +160,20 @@ PrefsDialog::displayTab(const Prefs &p)
 	    "minted, send each screen row at exactly that width and rely on the "
 	    "terminal wrapping there. 128 \u00D7 30 uses the whole panel; "
 	    "anything smaller is a window in its top left corner, with the rest "
-	    "shown grey. A change clears the screen.");
+	    "shown grey. A change clears the screen and the scroll-back.");
 	note->setWordWrap(true);
+
+	scrollback = new QSpinBox;
+	scrollback->setRange(0, 5000);
+	scrollback->setSingleStep(100);
+	scrollback->setSuffix(" lines");
+	scrollback->setSpecialValueText("off");
+	scrollback->setValue(p.scrollback_lines);
 
 	QFormLayout *f = new QFormLayout(tab);
 	f->addRow("Text area:", area);
 	f->addRow("", note);
+	f->addRow("Scroll-back:", scrollback);
 	f->addRow("Scaling:", scaling);
 	f->addRow("", smooth);
 	return tab;
@@ -207,6 +215,7 @@ PrefsDialog::prefs() const
 	p.smooth = smooth->isChecked();
 	p.text_cols = text_cols->value();
 	p.text_rows = text_rows->value();
+	p.scrollback_lines = scrollback->value();
 	p.auto_reconnect = auto_reconnect->isChecked();
 	p.clear_on_reconnect = clear_on_reconnect->isChecked();
 	p.connect_at_start = connect_at_start->isChecked();

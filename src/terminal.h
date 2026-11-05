@@ -8,11 +8,19 @@
  * framed. What the FIFO cannot take yet waits here.
  *
  * The firmware keeps its state in globals, so there is one Terminal.
+ *
+ * Scroll-back: each line the console scrolls off the top of the text area is
+ * kept -- its character codes, for copying, and its pixels as the panel showed
+ * them, for display -- up to a limit. Lines are numbered for good: line N is
+ * the Nth ever to scroll off, and the live screen's row r is line
+ * linesScrolled() + r, so a position in the history stays put as new lines
+ * arrive and old ones are dropped.
  */
 
 #pragma once
 
 #include <QByteArray>
+#include <QList>
 #include <QObject>
 
 class Terminal : public QObject {
@@ -20,6 +28,7 @@ class Terminal : public QObject {
 
 public:
 	explicit Terminal(QObject *parent = nullptr);
+	~Terminal() override;
 
 	/* Queue bytes received from the board for the interpreter. */
 	void feed(const QByteArray &bytes);
@@ -56,6 +65,21 @@ public:
 	 * whose read pops the FIFO. */
 	QByteArray takeInput();
 
+	/* Scroll-back. The limit is in lines; 0 keeps none. Lowering it drops
+	 * the oldest. */
+	void setScrollbackLimit(int lines);
+	void clearScrollback();
+	qint64 linesScrolled() const { return scrolled; }
+	/* Lines held: they are numbered linesScrolled() - historySize() up to
+	 * linesScrolled() - 1. */
+	int historySize() const { return history.size(); }
+	/* Line n's character codes, area-wide: from the history or, from
+	 * linesScrolled() on, the live screen. Empty if no longer held. */
+	QByteArray lineCells(qint64 n) const;
+	/* A held line's pixels: 16 rows of the area's width in pixels,
+	 * RGB332, top row first. Empty if n is not in the history. */
+	QByteArray linePixels(qint64 n) const;
+
 	/* Bytes received but not yet accepted by the command FIFO. */
 	qsizetype backlog() const { return pending.size() - pending_pos; }
 
@@ -63,10 +87,20 @@ private:
 	bool fill_fifo();
 	void applyFace();
 	QByteArray windowSetup() const;
+	void scrolling(int col, int row, int cols, int rows);
+	static void scrollHook(int col, int row, int cols, int rows);
+
+	struct Line {
+		QByteArray cells;
+		QByteArray pixels;
+	};
 
 	QByteArray pending;
 	qsizetype pending_pos = 0;
 	QByteArray face;	/* the renderer points into this */
 	int area_cols;
 	int area_rows;
+	QList<Line> history;	/* oldest first */
+	int history_limit = 0;
+	qint64 scrolled = 0;	/* lines ever scrolled off */
 };

@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QImage>
 #include <QMouseEvent>
+#include <QWheelEvent>
 
 #include "screen.h"
 #include "terminal.h"
@@ -76,6 +77,7 @@ test_selection(Screen &s)
 	Terminal t;
 	int made = 0;
 
+	s.setTerminal(&t);
 	QObject::connect(&s, &Screen::selectionMade, [&made] { made++; });
 	t.feed(QByteArray("\x05\x20\x0C", 3));
 	t.feed("hello world\r\nsecond line");
@@ -136,6 +138,102 @@ test_selection(Screen &s)
 	CHECK(s.selectedText().startsWith("hello world\nsecond line\n"));
 	s.clearSelection();
 	CHECK(!s.hasSelection());
+	s.setTerminal(nullptr);
+}
+
+/* RGB332 as the screen shows it: high bits replicated into the low. */
+static QRgb
+rgb332(uint8_t i)
+{
+	const unsigned r3 = (i >> 5) & 7, g3 = (i >> 2) & 7, b2 = i & 3;
+
+	return qRgb((r3 << 5) | (r3 << 2) | (r3 >> 1),
+	    (g3 << 5) | (g3 << 2) | (g3 >> 1),
+	    (b2 << 6) | (b2 << 4) | (b2 << 2) | b2);
+}
+
+static void
+settle(Terminal &t)
+{
+	for (int i = 0; i < 10000 && !(t.backlog() == 0 && vid_link_idle()); i++)
+		t.pump(5);
+}
+
+static void
+numbered(Terminal &t, int first, int count)
+{
+	for (int i = first; i < first + count; i++)
+		t.feed(QString("line %1\r\n").arg(i, 2, 10, QChar('0')).toLatin1());
+	settle(t);
+}
+
+/* Scrolled back, the text area shows held lines as they looked; the view
+ * stays on them as output arrives; selections reach into the history and
+ * keep to their text. */
+static void
+test_scrollback(Screen &s)
+{
+	const int k = 1;
+	Terminal t;
+
+	t.setTextArea(80, 25);
+	t.setScrollbackLimit(500);
+	t.reset();
+	t.feed(QByteArray("\x05\x20\x0C", 3));
+	numbered(t, 0, 30);			/* lines 00-05 held */
+	s.setTextArea(80, 25);
+	s.setTerminal(&t);
+	const qint64 held_first = t.linesScrolled() - t.historySize();
+
+	CHECK(s.scrolledBack() == 0);
+	s.scrollBy(3);
+	CHECK(s.scrolledBack() == 3);
+
+	/* The top row now shows the held "line 03", pixel for pixel. */
+	const QImage img = shot(s, k);
+	const QByteArray px = t.linePixels(held_first + 3);
+	bool same = px.size() == 640 * CHAR_H;
+	int lit = 0;
+	for (int y = 0; same && y < CHAR_H; y++)
+		for (int x = 0; same && x < 640; x++) {
+			const uint8_t v = (uint8_t)px[y * 640 + x];
+			same = img.pixel(x, y) == rgb332(v);
+			lit += v != (uint8_t)px[0];
+		}
+	CHECK(same);
+	CHECK(lit > 0);			/* there was text to compare */
+	/* Row 3 of the view is the live screen's row 0, "line 06". */
+	mouse(s, QEvent::MouseButtonPress, centre(0, 3, k));
+	mouse(s, QEvent::MouseButtonRelease, centre(0, 3, k));
+	mouse(s, QEvent::MouseButtonDblClick, centre(5, 3, k));
+	mouse(s, QEvent::MouseButtonRelease, centre(5, 3, k));
+	CHECK(s.selectedText() == "06");
+
+	/* A drag in the history copies history text. */
+	drag(s, centre(0, 0, k), centre(6, 1, k));
+	CHECK(s.selectedText() == "line 03\nline 04");
+
+	/* New output: the view stays on the same lines, and so does the
+	 * selection. */
+	numbered(t, 30, 2);
+	CHECK(s.scrolledBack() == 5);
+	CHECK(s.selectedText() == "line 03\nline 04");
+
+	/* Clamped at both ends; the wheel moves three lines a notch. */
+	s.scrollBy(1000);
+	CHECK(s.scrolledBack() == t.historySize());
+	s.scrollToBottom();
+	CHECK(s.scrolledBack() == 0);
+	s.scrollBy(-5);
+	CHECK(s.scrolledBack() == 0);
+	QWheelEvent up(QPointF(10, 10), QPointF(10, 10), QPoint(),
+	    QPoint(0, 120), Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase,
+	    false);
+	QApplication::sendEvent(&s, &up);
+	CHECK(s.scrolledBack() == 3);
+
+	s.setTerminal(nullptr);
+	s.setTextArea(TEXT_COLS, TEXT_ROWS);
 }
 
 int
@@ -166,6 +264,7 @@ main(int argc, char *argv[])
 
 	s.setTextArea(TEXT_COLS, TEXT_ROWS);
 	test_selection(s);
+	test_scrollback(s);
 
 	if (failures == 0)
 		printf("test_screen: all passed\n");

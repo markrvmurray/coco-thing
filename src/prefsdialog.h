@@ -53,6 +53,7 @@ private:
 	QCheckBox *smooth;
 	QSpinBox *text_cols;
 	QSpinBox *text_rows;
+	QSpinBox *scrollback;
 
 	QCheckBox *auto_reconnect;
 	QCheckBox *clear_on_reconnect;

@@ -19,6 +19,7 @@
 #include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QScrollBar>
 #include <QSettings>
 
 #include "mainwindow.h"
@@ -180,6 +181,31 @@ main(int argc, char *argv[])
 	spin(500);
 	got += drain(board);
 	CHECK(got == expect);
+
+	/* Scroll-back: enough output to scroll, then the bar and the view
+	 * follow each other, and typing returns to the live screen. */
+	QByteArray lines;
+	for (int i = 0; i < 40; i++)
+		lines += QString("out %1\r\n").arg(i).toLatin1();
+	(void)write(board, lines.constData(), lines.size());
+	spin(300);
+	QScrollBar *bar = w->findChild<QScrollBar *>();
+	CHECK(bar != nullptr);
+	CHECK(screen->scrolledBack() == 0);
+	if (bar != nullptr) {
+		CHECK(bar->maximum() > 5);
+		CHECK(bar->value() == bar->maximum());	/* live */
+		screen->scrollBy(5);
+		spin(50);
+		CHECK(bar->value() == bar->maximum() - 5);
+		bar->setValue(bar->maximum() - 2);
+		CHECK(screen->scrolledBack() == 2);
+	}
+	key(screen, kVK_Shift, Qt::ShiftModifier);	/* no bytes: stays */
+	CHECK(screen->scrolledBack() == 2);
+	key(screen, kVK_ANSI_X, Qt::NoModifier);
+	CHECK(screen->scrolledBack() == 0);
+	drain(board);
 
 	/* Destroyed with the screen holding the keyboard. */
 	delete w;

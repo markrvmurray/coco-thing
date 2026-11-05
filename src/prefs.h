@@ -30,6 +30,10 @@ struct Prefs {
 	int text_cols = 80;
 	int text_rows = 25;
 
+	/* Lines kept after they scroll off the top; 0 keeps none. Each holds
+	 * its pixels, about 10 KB at 80 columns, hence the dialog's ceiling. */
+	int scrollback_lines = 500;
+
 	bool auto_reconnect = true;
 	bool clear_on_reconnect = true;
 	bool connect_at_start = true;

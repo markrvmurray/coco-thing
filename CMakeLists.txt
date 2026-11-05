@@ -29,7 +29,14 @@ add_library(pvcore STATIC
     ${PICOVIDEO}/src/hid_cook.cpp
     src/fw_stores.cpp
     src/fw_platform.cpp
+    src/fw_scroll.cpp
 )
+# Scroll-back intercepts the console's scrolls at the link: the renderer's
+# two scroll functions are renamed in its own unit, and src/fw_scroll.cpp
+# defines the originals' names in front of them.
+set_source_files_properties(${PICOVIDEO}/src/video_render.cpp PROPERTIES
+    COMPILE_DEFINITIONS
+    "vidterm_scroll_region=fw_vidterm_scroll_region;vidterm_scroll_up=fw_vidterm_scroll_up")
 target_include_directories(pvcore PUBLIC
     ${PICOVIDEO}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/shim

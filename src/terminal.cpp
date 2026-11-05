@@ -6,8 +6,11 @@
 
 #include "terminal.h"
 
+#include <cstring>
+
 #include <QElapsedTimer>
 
+#include "fw_platform.h"
 #include "video.h"
 #include "video_render.h"
 #include "vid_link.h"
@@ -24,10 +27,23 @@ void vidterm_set_font(const uint8_t *data, uint32_t len);
  * Any id but 0 (the root, the panel itself) would do. */
 static const uint8_t AREA_WINDOW = 1;
 
+/* The one Terminal, for the firmware's scroll hook. */
+static Terminal *the_terminal;
+
 Terminal::Terminal(QObject *parent)
 	: QObject(parent), area_cols(TEXT_COLS), area_rows(TEXT_ROWS)
 {
+	the_terminal = this;
+	fw_platform_set_scroll(scrollHook);
 	reset();
+}
+
+Terminal::~Terminal()
+{
+	if (the_terminal == this) {
+		fw_platform_set_scroll(nullptr);
+		the_terminal = nullptr;
+	}
 }
 
 void
@@ -59,6 +75,96 @@ Terminal::setTextArea(int cols, int rows)
 {
 	area_cols = qBound(1, cols, (int)TEXT_COLS);
 	area_rows = qBound(1, rows, (int)TEXT_ROWS);
+	// Lines of the old width would not fit the new area.
+	clearScrollback();
+}
+
+void
+Terminal::scrollHook(int col, int row, int cols, int rows)
+{
+	if (the_terminal != nullptr)
+		the_terminal->scrolling(col, row, cols, rows);
+}
+
+/* The console is about to scroll a rectangle up one row. Only the whole text
+ * area scrolling is output running off the top; a rectangle starting lower
+ * is a line being deleted below the top, and belongs to the screen, not the
+ * history. (Deleting the top line itself looks exactly like a scroll, so it
+ * is kept too.) */
+void
+Terminal::scrolling(int col, int row, int cols, int rows)
+{
+	if (col != 0 || row != 0 || cols != area_cols || rows != area_rows)
+		return;
+
+	scrolled++;
+	if (history_limit == 0)
+		return;
+
+	// The text layer is drawn lazily; bring the departing row's pixels up
+	// to date before taking them.
+	vidterm_refresh();
+
+	Line line;
+	uint8_t cells[TEXT_COLS * 2];
+	vidterm_read_row(0, 0, area_cols, cells);
+	line.cells.resize(area_cols);
+	for (int c = 0; c < area_cols; c++)
+		line.cells[c] = (char)cells[c * 2];
+
+	const int width = area_cols * CHAR_W;
+	line.pixels.resize(width * CHAR_H);
+	for (int y = 0; y < CHAR_H; y++)
+		memcpy(line.pixels.data() + y * width, video_framebuffer[y], width);
+
+	history.append(line);
+	while (history.size() > history_limit)
+		history.removeFirst();
+}
+
+void
+Terminal::setScrollbackLimit(int lines)
+{
+	history_limit = qMax(0, lines);
+	while (history.size() > history_limit)
+		history.removeFirst();
+}
+
+void
+Terminal::clearScrollback()
+{
+	history.clear();
+}
+
+QByteArray
+Terminal::lineCells(qint64 n) const
+{
+	const qint64 first = scrolled - history.size();
+
+	if (n >= scrolled) {
+		const qint64 row = n - scrolled;
+		if (row >= area_rows)
+			return {};
+		uint8_t cells[TEXT_COLS * 2];
+		QByteArray out(area_cols, ' ');
+		vidterm_read_row(0, (int)row, area_cols, cells);
+		for (int c = 0; c < area_cols; c++)
+			out[c] = (char)cells[c * 2];
+		return out;
+	}
+	if (n < first)
+		return {};
+	return history[(int)(n - first)].cells;
+}
+
+QByteArray
+Terminal::linePixels(qint64 n) const
+{
+	const qint64 first = scrolled - history.size();
+
+	if (n < first || n >= scrolled)
+		return {};
+	return history[(int)(n - first)].pixels;
 }
 
 QByteArray

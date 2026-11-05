@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "fw_platform.h"
+#include "screentext.h"
 #include "terminal.h"
 #include "video.h"
 #include "video_render.h"
@@ -227,6 +228,90 @@ test_bell(Terminal &t)
 	fw_platform_set_bell(nullptr);
 }
 
+/* Write `count` numbered lines, "line 00" upwards, each ended CR LF. */
+static void
+numbered(Terminal &t, int first, int count)
+{
+	for (int i = first; i < first + count; i++)
+		t.feed(QString("line %1\r\n").arg(i, 2, 10, QChar('0')).toLatin1());
+	settle(t);
+}
+
+static QString
+text_of(Terminal &t, qint64 n)
+{
+	return screentext_cells(t.lineCells(n), 0, TEXT_COLS - 1);
+}
+
+/* Lines scrolling off the top of the text area are kept, text and pixels,
+ * up to the limit; deleting a line lower down is not scrolling. */
+static void
+test_scrollback(Terminal &t)
+{
+	t.setTextArea(80, 25);
+	t.setScrollbackLimit(500);
+	t.reset();
+	t.feed(QByteArray("\x05\x20\x0C", 3));	/* cursor off, clear */
+	settle(t);
+	const qint64 base = t.linesScrolled();
+
+	/* 30 lines in 25 rows: the first 24 newlines move down the screen,
+	 * the last 6 scroll "line 00" to "line 05" off the top. */
+	numbered(t, 0, 30);
+	CHECK(t.linesScrolled() - base == 6);
+	CHECK(t.historySize() == 6);
+	CHECK(text_of(t, base) == "line 00");
+	CHECK(text_of(t, base + 5) == "line 05");
+	CHECK(text_of(t, base + 6) == "line 06");	/* the live top row */
+	CHECK(t.linePixels(base + 6).isEmpty());	/* live, not held */
+
+	/* A held line's pixels are what the panel showed for its text:
+	 * draw "line 00" on the live screen again and compare. */
+	const QByteArray kept = t.linePixels(base);
+	CHECK(kept.size() == 80 * CHAR_W * CHAR_H);
+	t.feed(QByteArray("\x01\x0B", 2) + "line 00");	/* home, erase line */
+	settle(t);
+	vidterm_refresh();
+	bool same = kept.size() == 80 * CHAR_W * CHAR_H;
+	for (int y = 0; same && y < CHAR_H; y++)
+		same = memcmp(kept.constData() + y * 80 * CHAR_W,
+		    video_framebuffer[y], 80 * CHAR_W) == 0;
+	CHECK(same);
+
+	/* Deleting a line below the top moves rows but loses nothing. */
+	const qint64 before = t.linesScrolled();
+	t.feed(QByteArray("\x02\x20\x25\x1F\x31", 5));	/* row 5, delete */
+	settle(t);
+	CHECK(t.linesScrolled() == before);
+
+	/* The limit drops the oldest. */
+	t.setScrollbackLimit(3);
+	CHECK(t.historySize() == 3);
+	CHECK(t.lineCells(base).isEmpty());
+	CHECK(text_of(t, base + 3) == "line 03");
+
+	/* 0 keeps nothing, though the lines are still counted. */
+	t.setScrollbackLimit(0);
+	t.feed(QByteArray("\x02\x20\x38", 3));	/* to row 24, the last */
+	numbered(t, 30, 2);
+	CHECK(t.historySize() == 0);
+	CHECK(t.linesScrolled() == before + 2);
+
+	/* The whole panel scrolls by the other path; it is kept too. */
+	t.setScrollbackLimit(500);
+	t.setTextArea(TEXT_COLS, TEXT_ROWS);
+	t.reset();
+	t.feed(QByteArray("\x05\x20\x0C", 3));
+	numbered(t, 0, TEXT_ROWS + 2);
+	CHECK(t.historySize() == 3);
+	CHECK(text_of(t, t.linesScrolled() - 3) == "line 00");
+	CHECK(t.lineCells(t.linesScrolled() - 3).size() == TEXT_COLS);
+
+	t.setScrollbackLimit(0);
+	t.reset();
+	settle(t);
+}
+
 int
 main()
 {
@@ -238,6 +323,7 @@ main()
 	test_face(t);
 	test_text_area_wraps_like_minted(t);
 	test_bell(t);
+	test_scrollback(t);
 
 	if (failures == 0)
 		printf("test_terminal: all passed\n");

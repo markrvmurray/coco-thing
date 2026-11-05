@@ -25,6 +25,8 @@ Prefs::load()
 	p.smooth = s.value("display/smooth", p.smooth).toBool();
 	p.text_cols = s.value("display/text_cols", p.text_cols).toInt();
 	p.text_rows = s.value("display/text_rows", p.text_rows).toInt();
+	p.scrollback_lines = s.value("display/scrollback_lines",
+	    p.scrollback_lines).toInt();
 	p.auto_reconnect = s.value("connection/auto_reconnect",
 	    p.auto_reconnect).toBool();
 	p.clear_on_reconnect = s.value("connection/clear_on_reconnect",
@@ -47,6 +49,7 @@ Prefs::save() const
 	s.setValue("display/smooth", smooth);
 	s.setValue("display/text_cols", text_cols);
 	s.setValue("display/text_rows", text_rows);
+	s.setValue("display/scrollback_lines", scrollback_lines);
 	s.setValue("connection/auto_reconnect", auto_reconnect);
 	s.setValue("connection/clear_on_reconnect", clear_on_reconnect);
 	s.setValue("connection/connect_at_start", connect_at_start);

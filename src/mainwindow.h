@@ -10,6 +10,7 @@
 #include <QElapsedTimer>
 #include <QLabel>
 #include <QMainWindow>
+#include <QScrollBar>
 #include <QTimer>
 
 #include "keyboard.h"
@@ -41,12 +42,14 @@ private slots:
 	void cut();
 	void paste();
 	void selectAll();
+	void syncScrollBar();
 
 private:
 	void showState();
 	void applyPrefs();
 
 	Screen *screen;
+	QScrollBar *scroll_bar;
 	Terminal terminal;
 	Link link;
 	Keyboard keyboard;

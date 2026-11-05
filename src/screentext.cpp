@@ -9,35 +9,6 @@
 #include <QHash>
 
 #include "fontface.h"
-#include "video.h"
-
-QString
-screentext_read(int col0, int row0, int col1, int row1, int left, int right)
-{
-	QStringList lines;
-	uint8_t cells[TEXT_COLS * 2];
-
-	for (int row = row0; row <= row1; row++) {
-		const int from = row == row0 ? col0 : left;
-		const int to = row == row1 ? col1 : right;
-		QString line;
-
-		if (row < 0 || row >= TEXT_ROWS || from > to)
-			continue;
-		vidterm_read_row(0, row, TEXT_COLS, cells);
-		for (int col = qMax(from, 0); col <= to && col < TEXT_COLS; col++) {
-			const char32_t u = fontface_cp437(cells[col * 2]);
-			// Code 0 is an empty cell; the no-break space is just
-			// a space to anyone pasting it.
-			line += (u == 0 || u == U' ') ? QChar(' ') :
-			    QString::fromUcs4(&u, 1);
-		}
-		while (line.endsWith(' '))
-			line.chop(1);
-		lines << line;
-	}
-	return lines.join('\n');
-}
 
 /* A cell showing nothing: empty, space, or CP437's no-break space. */
 static bool
@@ -46,22 +17,37 @@ blank(uint8_t code)
 	return code == 0 || code == ' ' || code == 0xFF;
 }
 
-bool
-screentext_word(int col, int row, int left, int right, int *from, int *to)
+QString
+screentext_cells(const QByteArray &cells, int from, int to)
 {
-	uint8_t cells[TEXT_COLS * 2];
+	QString line;
 
-	if (row < 0 || row >= TEXT_ROWS || col < left || col > right ||
-	    col >= TEXT_COLS)
+	for (int col = qMax(from, 0); col <= to && col < cells.size(); col++) {
+		const uint8_t code = (uint8_t)cells[col];
+		const char32_t u = fontface_cp437(code);
+
+		line += blank(code) ? QChar(' ') : QString::fromUcs4(&u, 1);
+	}
+	while (line.endsWith(' '))
+		line.chop(1);
+	return line;
+}
+
+bool
+screentext_word(const QByteArray &cells, int col, int left, int right,
+    int *from, int *to)
+{
+	const auto at = [&cells](int c) { return (uint8_t)cells[c]; };
+
+	if (col < left || col > right || col < 0 || col >= cells.size())
 		return false;
-	vidterm_read_row(0, row, TEXT_COLS, cells);
-	if (blank(cells[col * 2]))
+	if (blank(at(col)))
 		return false;
 
 	int a = col, b = col;
-	while (a > left && !blank(cells[(a - 1) * 2]))
+	while (a > left && !blank(at(a - 1)))
 		a--;
-	while (b < right && b + 1 < TEXT_COLS && !blank(cells[(b + 1) * 2]))
+	while (b < right && b + 1 < cells.size() && !blank(at(b + 1)))
 		b++;
 	*from = a;
 	*to = b;

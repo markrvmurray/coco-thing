@@ -9,9 +9,11 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QWheelEvent>
 
 #include "keyboard.h"
 #include "screentext.h"
+#include "terminal.h"
 #include "video.h"
 #include "video_render.h"
 
@@ -75,22 +77,98 @@ Screen::panelRect() const
 	    (height() - fit.height()) / 2), fit);
 }
 
-QPoint
+void
+Screen::setTerminal(Terminal *t)
+{
+	term = t;
+	back = 0;
+	seen = t != nullptr ? t->linesScrolled() : 0;
+	clearSelection();
+}
+
+qint64
+Screen::topLine() const
+{
+	if (term == nullptr)
+		return 0;
+
+	// Lines that scrolled off since we last looked: a view that is back
+	// in the history moves back with them, so it keeps showing the same
+	// lines; a live view stays live.
+	const qint64 now = term->linesScrolled();
+	if (back > 0)
+		back += now - seen;
+	seen = now;
+	back = qMin(back, (qint64)term->historySize());
+	return now - back;
+}
+
+qint64
+Screen::scrolledBack() const
+{
+	topLine();
+	return back;
+}
+
+void
+Screen::scrollBy(qint64 lines)
+{
+	if (term == nullptr)
+		return;
+	topLine();
+	back = qBound((qint64)0, back + lines, (qint64)term->historySize());
+	update();
+	emit viewChanged();
+}
+
+void
+Screen::scrollToBottom()
+{
+	scrollBy(-scrolledBack());
+}
+
+void
+Screen::scrollToTop()
+{
+	scrollBy(term != nullptr ? term->historySize() : 0);
+}
+
+int
+Screen::areaCols() const
+{
+	return area.width() / CHAR_W;
+}
+
+int
+Screen::areaRows() const
+{
+	return area.height() / CHAR_H;
+}
+
+int
+Screen::pageRows() const
+{
+	return areaRows();
+}
+
+Screen::Pos
 Screen::cellAt(const QPointF &pos) const
 {
 	const QRect panel = panelRect();
 	const qreal x = (pos.x() - panel.left()) * FB_WIDTH / panel.width();
 	const qreal y = (pos.y() - panel.top()) * FB_HEIGHT / panel.height();
+	Pos p;
 
-	return QPoint(qBound(0, (int)(x / CHAR_W), area.width() / CHAR_W - 1),
-	    qBound(0, (int)(y / CHAR_H), area.height() / CHAR_H - 1));
+	p.col = qBound(0, (int)(x / CHAR_W), areaCols() - 1);
+	p.line = topLine() + qBound(0, (int)(y / CHAR_H), areaRows() - 1);
+	return p;
 }
 
 void
-Screen::ordered(QPoint &from, QPoint &to) const
+Screen::ordered(Pos &from, Pos &to) const
 {
-	const bool forward = anchor.y() < head.y() ||
-	    (anchor.y() == head.y() && anchor.x() <= head.x());
+	const bool forward = anchor.line < head.line ||
+	    (anchor.line == head.line && anchor.col <= head.col);
 
 	from = forward ? anchor : head;
 	to = forward ? head : anchor;
@@ -99,20 +177,34 @@ Screen::ordered(QPoint &from, QPoint &to) const
 QString
 Screen::selectedText() const
 {
-	QPoint from, to;
+	Pos from, to;
+	QStringList lines;
 
-	if (!selected)
+	if (!selected || term == nullptr)
 		return {};
 	ordered(from, to);
-	return screentext_read(from.x(), from.y(), to.x(), to.y(), 0,
-	    area.width() / CHAR_W - 1);
+	for (qint64 n = from.line; n <= to.line; n++) {
+		const QByteArray cells = term->lineCells(n);
+
+		if (cells.isEmpty())
+			continue;	/* dropped from the history meanwhile */
+		lines << screentext_cells(cells,
+		    n == from.line ? from.col : 0,
+		    n == to.line ? to.col : areaCols() - 1);
+	}
+	return lines.join('\n');
 }
 
 void
 Screen::selectAll()
 {
-	anchor = QPoint(0, 0);
-	head = QPoint(area.width() / CHAR_W - 1, area.height() / CHAR_H - 1);
+	if (term == nullptr)
+		return;
+	// Everything held: the history and the live screen.
+	anchor.col = 0;
+	anchor.line = term->linesScrolled() - term->historySize();
+	head.col = areaCols() - 1;
+	head.line = term->linesScrolled() + areaRows() - 1;
 	selected = true;
 	update();
 }
@@ -161,17 +253,39 @@ Screen::mouseDoubleClickEvent(QMouseEvent *ev)
 	// The first click's press already started afresh; a blank cell
 	// leaves nothing selected.
 	dragging = false;
-	const QPoint cell = cellAt(ev->position());
-	if (screentext_word(cell.x(), cell.y(), 0, area.width() / CHAR_W - 1,
-	    &from, &to)) {
-		anchor = QPoint(from, cell.y());
-		head = QPoint(to, cell.y());
+	const Pos cell = cellAt(ev->position());
+	const QByteArray cells = term != nullptr ? term->lineCells(cell.line) :
+	    QByteArray();
+	if (screentext_word(cells, cell.col, 0, areaCols() - 1, &from, &to)) {
+		anchor.col = from;
+		head.col = to;
+		anchor.line = head.line = cell.line;
 		selected = true;
 		emit selectionMade();
 	} else {
 		selected = false;
 	}
 	update();
+}
+
+void
+Screen::wheelEvent(QWheelEvent *ev)
+{
+	// A trackpad reports pixels, a wheel notches of 1/8 degree (120 a
+	// notch, three lines a notch, as elsewhere). Up scrolls back.
+	const QRect panel = panelRect();
+	const qreal row_px = (qreal)CHAR_H * panel.height() / FB_HEIGHT;
+
+	if (!ev->pixelDelta().isNull())
+		wheel_rest += ev->pixelDelta().y() / row_px;
+	else
+		wheel_rest += ev->angleDelta().y() / 120.0 * 3;
+
+	const qint64 lines = (qint64)wheel_rest;
+	wheel_rest -= lines;
+	if (lines != 0)
+		scrollBy(lines);
+	ev->accept();
 }
 
 void
@@ -195,13 +309,43 @@ Screen::paintEvent(QPaintEvent *)
 	const QSize fit = target.size();
 	p.setRenderHint(QPainter::SmoothPixmapTransform,
 	    smooth && fit.width() % FB_WIDTH != 0);
-	p.drawImage(target, image);
+
+	// Everything below is drawn in panel pixels.
+	p.translate(target.topLeft());
+	p.scale((qreal)fit.width() / FB_WIDTH, (qreal)fit.height() / FB_HEIGHT);
+	p.drawImage(QRect(0, 0, FB_WIDTH, FB_HEIGHT), image);
+
+	// Scrolled back: the text area shows lines from the history, as they
+	// looked when they scrolled off, above the top of the live screen.
+	const qint64 top = topLine();
+	const qint64 live = term != nullptr ? term->linesScrolled() : 0;
+	if (back > 0) {
+		for (int row = 0; row < areaRows(); row++) {
+			const qint64 n = top + row;
+			const QRect dst(0, row * CHAR_H, area.width(), CHAR_H);
+
+			if (n >= live) {
+				p.drawImage(dst, image, QRect(0,
+				    (int)(n - live) * CHAR_H, area.width(),
+				    CHAR_H));
+				continue;
+			}
+			const QByteArray px = term->linePixels(n);
+			if (px.size() != area.width() * CHAR_H) {
+				p.fillRect(dst, Qt::black);
+				continue;
+			}
+			QImage strip((const uchar *)px.constData(),
+			    area.width(), CHAR_H, area.width(),
+			    QImage::Format_Indexed8);
+			strip.setColorTable(image.colorTable());
+			p.drawImage(dst, strip);
+		}
+	}
 
 	// Drawn over the framebuffer at every paint, so nothing the board
 	// sends -- a clear, graphics with the window's clip lifted -- can
 	// paint the unused part of the panel.
-	p.translate(target.topLeft());
-	p.scale((qreal)fit.width() / FB_WIDTH, (qreal)fit.height() / FB_HEIGHT);
 	p.fillRect(QRect(area.width(), 0, FB_WIDTH - area.width(), FB_HEIGHT),
 	    UNUSED);
 	p.fillRect(QRect(0, area.height(), area.width(),
@@ -210,14 +354,17 @@ Screen::paintEvent(QPaintEvent *)
 	// The selection, in reverse video: each row from its first selected
 	// cell to its last.
 	if (selected) {
-		QPoint from, to;
-		const int right = area.width() / CHAR_W - 1;
+		Pos from, to;
+		const int right = areaCols() - 1;
 
 		ordered(from, to);
 		p.setCompositionMode(QPainter::CompositionMode_Difference);
-		for (int row = from.y(); row <= to.y(); row++) {
-			const int c0 = row == from.y() ? from.x() : 0;
-			const int c1 = row == to.y() ? to.x() : right;
+		for (int row = 0; row < areaRows(); row++) {
+			const qint64 n = top + row;
+			if (n < from.line || n > to.line)
+				continue;
+			const int c0 = n == from.line ? from.col : 0;
+			const int c1 = n == to.line ? to.col : right;
 			p.fillRect(QRect(c0 * CHAR_W, row * CHAR_H,
 			    (c1 - c0 + 1) * CHAR_W, CHAR_H), Qt::white);
 		}

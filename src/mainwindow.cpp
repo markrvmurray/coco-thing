@@ -9,6 +9,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMenuBar>
 #include <QSerialPortInfo>
@@ -51,9 +52,26 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 {
 	setWindowTitle("coco-thing");
 
-	screen = new Screen(this);
-	setCentralWidget(screen);
+	// The screen, with the scroll-back's scroll bar beside it.
+	QWidget *central = new QWidget(this);
+	QHBoxLayout *row = new QHBoxLayout(central);
+	row->setContentsMargins(0, 0, 0, 0);
+	row->setSpacing(0);
+	screen = new Screen(central);
+	scroll_bar = new QScrollBar(Qt::Vertical, central);
+	row->addWidget(screen, 1);
+	row->addWidget(scroll_bar);
+	setCentralWidget(central);
+	screen->setFocus();
+
+	screen->setTerminal(&terminal);
 	screen->setKeyboard(&keyboard);
+	connect(screen, &Screen::viewChanged, this, &MainWindow::syncScrollBar);
+	// The bar's value counts down from the live screen at its maximum.
+	connect(scroll_bar, &QScrollBar::valueChanged, this, [this](int v) {
+		screen->scrollBy((scroll_bar->maximum() - v) -
+		    screen->scrolledBack());
+	});
 	fw_platform_set_bell([] { QApplication::beep(); });
 	connect(screen, &Screen::keysTyped, this, &MainWindow::sendKeys);
 	clock.start();
@@ -80,6 +98,22 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	edit->addSeparator();
 	edit->addAction("Select &All", shortcut(Qt::Key_A), this,
 	    &MainWindow::selectAll);
+	QMenu *view = menuBar()->addMenu("&View");
+	view->addAction("Scroll Up a Page", shortcut(Qt::Key_PageUp), this,
+	    [this] { screen->scrollBy(screen->pageRows()); });
+	view->addAction("Scroll Down a Page", shortcut(Qt::Key_PageDown),
+	    this, [this] { screen->scrollBy(-screen->pageRows()); });
+	view->addAction("Scroll to Top", shortcut(Qt::Key_Home), this,
+	    [this] { screen->scrollToTop(); });
+	view->addAction("Scroll to Bottom", shortcut(Qt::Key_End), this,
+	    [this] { screen->scrollToBottom(); });
+	view->addSeparator();
+	view->addAction("Clear Scroll-back", this, [this] {
+		screen->clearSelection();
+		terminal.clearScrollback();
+		screen->scrollToBottom();
+	});
+
 	// Selecting copies, as the pasteboard's "primary selection".
 	connect(screen, &Screen::selectionMade, this, &MainWindow::copy);
 
@@ -157,6 +191,8 @@ MainWindow::applyPrefs()
 		screen->setTextArea(terminal.textCols(), terminal.textRows());
 	}
 
+	terminal.setScrollbackLimit(prefs.scrollback_lines);
+	screen->scrollBy(0);		/* re-clamp to what is left */
 	screen->setScaling(prefs.scaling == Prefs::ScaleInteger, prefs.smooth);
 	link.setAutoReconnect(prefs.auto_reconnect);
 	screen->update();
@@ -233,8 +269,13 @@ void
 MainWindow::sendKeys()
 {
 	// Read out even when nothing is connected, so keys typed then are
-	// dropped rather than sent later.
-	link.write(terminal.takeInput());
+	// dropped rather than sent later. Typing returns the view to the
+	// live screen, as in any terminal.
+	const QByteArray bytes = terminal.takeInput();
+	if (bytes.isEmpty())
+		return;
+	screen->scrollToBottom();
+	link.write(bytes);
 }
 
 void
@@ -249,6 +290,7 @@ MainWindow::tick()
 	}
 	terminal.pump(PUMP_BUDGET_MS);
 	terminal.frame();
+	syncScrollBar();
 	screen->update();
 	showState();
 }
@@ -275,6 +317,7 @@ MainWindow::paste()
 		return;
 	}
 	pasting += screentext_paste(QApplication::clipboard()->text());
+	screen->scrollToBottom();
 }
 
 void
@@ -282,6 +325,18 @@ MainWindow::selectAll()
 {
 	screen->selectAll();
 	copy();
+}
+
+/* The bar spans the history plus a page; at its maximum the view is live. */
+void
+MainWindow::syncScrollBar()
+{
+	const QSignalBlocker quiet(scroll_bar);
+	const int held = terminal.historySize();
+
+	scroll_bar->setRange(0, held);
+	scroll_bar->setPageStep(screen->pageRows());
+	scroll_bar->setValue(held - (int)screen->scrolledBack());
 }
 
 void
@@ -304,5 +359,8 @@ MainWindow::showState()
 		s += QString("   backlog %1 B").arg(terminal.backlog());
 	if (!pasting.isEmpty())
 		s += QString("   pasting %1 B").arg(pasting.size());
+	if (screen->scrolledBack() > 0)
+		s += QString("   scrolled back %1 of %2 lines")
+		    .arg(screen->scrolledBack()).arg(terminal.historySize());
 	state->setText(s);
 }

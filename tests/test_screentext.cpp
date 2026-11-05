@@ -41,10 +41,10 @@ bytes(std::initializer_list<int> b)
 	return out;
 }
 
-/* Rows as the screen shows them; the selection runs to the end of each row
- * and starts each later row at the left edge. */
+/* A line's cells as text: CP437 to Unicode, blanks inside kept, trailing
+ * blanks dropped. Lines come from Terminal::lineCells(). */
 static void
-test_read(Terminal &t)
+test_cells(Terminal &t)
 {
 	const int right = TEXT_COLS - 1;
 
@@ -54,13 +54,17 @@ test_read(Terminal &t)
 	t.feed(QByteArray("\x9C" "5 \xAA" "x", 5));	/* CP437 pound and not */
 	settle(t);
 
-	CHECK(screentext_read(0, 0, right, 0, 0, right) == "hello world");
-	CHECK(screentext_read(6, 0, 10, 0, 0, right) == "world");
-	CHECK(screentext_read(6, 0, 3, 1, 0, right) == "world\n  se");
-	CHECK(screentext_read(0, 0, right, 3, 0, right) ==
-	    "hello world\n  second line\n£5 ¬x\n");
-	/* Blank cells are spaces inside a line, dropped at its end. */
-	CHECK(screentext_read(0, 1, 5, 1, 0, right) == "  seco");
+	const qint64 top = t.linesScrolled();
+	CHECK(screentext_cells(t.lineCells(top), 0, right) == "hello world");
+	CHECK(screentext_cells(t.lineCells(top), 6, 10) == "world");
+	CHECK(screentext_cells(t.lineCells(top + 1), 0, right) ==
+	    "  second line");
+	CHECK(screentext_cells(t.lineCells(top + 1), 0, 5) == "  seco");
+	CHECK(screentext_cells(t.lineCells(top + 2), 0, right) ==
+	    "\u00A35 \u00ACx");
+	CHECK(screentext_cells(t.lineCells(top + 3), 0, right).isEmpty());
+	/* A line beyond the area does not exist. */
+	CHECK(t.lineCells(top + TEXT_ROWS).isEmpty());
 }
 
 /* Words run between blanks, so a path or an option is one word; the
@@ -74,24 +78,25 @@ test_word(Terminal &t)
 	t.feed(QByteArray("\x0C", 1));
 	t.feed("ls /dd/cmds -e=foo  x");
 	settle(t);
+	const QByteArray line = t.lineCells(t.linesScrolled());
 
-	CHECK(screentext_word(5, 0, 0, right, &from, &to));
+	CHECK(screentext_word(line, 5, 0, right, &from, &to));
 	CHECK(from == 3 && to == 10);			/* /dd/cmds */
-	CHECK(screentext_word(0, 0, 0, right, &from, &to));
+	CHECK(screentext_word(line, 0, 0, right, &from, &to));
 	CHECK(from == 0 && to == 1);			/* ls */
-	CHECK(screentext_word(15, 0, 0, right, &from, &to));
+	CHECK(screentext_word(line, 15, 0, right, &from, &to));
 	CHECK(from == 12 && to == 17);			/* -e=foo */
-	CHECK(screentext_word(20, 0, 0, right, &from, &to));
+	CHECK(screentext_word(line, 20, 0, right, &from, &to));
 	CHECK(from == 20 && to == 20);			/* x */
 
 	from = to = -1;
-	CHECK(!screentext_word(2, 0, 0, right, &from, &to));	/* a blank */
-	CHECK(!screentext_word(19, 0, 0, right, &from, &to));
-	CHECK(!screentext_word(40, 0, 0, right, &from, &to));	/* empty */
+	CHECK(!screentext_word(line, 2, 0, right, &from, &to));	/* a blank */
+	CHECK(!screentext_word(line, 19, 0, right, &from, &to));
+	CHECK(!screentext_word(line, 40, 0, right, &from, &to));	/* empty */
 	CHECK(from == -1 && to == -1);
 
 	/* Bounded by the area: columns 5..8 only. */
-	CHECK(screentext_word(6, 0, 5, 8, &from, &to));
+	CHECK(screentext_word(line, 6, 5, 8, &from, &to));
 	CHECK(from == 5 && to == 8);
 }
 
@@ -115,7 +120,7 @@ main()
 {
 	Terminal t;
 
-	test_read(t);
+	test_cells(t);
 	test_word(t);
 	test_paste();
 
