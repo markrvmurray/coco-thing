@@ -10,6 +10,10 @@
  * after a loss, and also when the port is not there to begin with, so the
  * terminal can be started before the board.
  *
+ * The port named LOOPBACK is not a device but a loopback plug: everything
+ * written comes back as received, with the handshake lines tied, so nothing
+ * ever holds it up. It opens at once, and is never lost or waited for.
+ *
  * A loss is noticed two ways: a ResourceError from the port, or the device
  * node disappearing while the port is open (checked on each poll, because a
  * port with nothing to read may not report the error until it is written).
@@ -32,6 +36,9 @@ public:
 		Waiting,	/* wanted, not open: polling for it */
 		Open,
 	};
+
+	/* The virtual loopback port's name. */
+	static const QString LOOPBACK;
 
 	explicit Link(QObject *parent = nullptr);
 
@@ -66,6 +73,7 @@ signals:
 
 private slots:
 	void readPort();
+	void echo();
 	void portError(QSerialPort::SerialPortError e);
 	void check();
 
@@ -83,4 +91,6 @@ private:
 	State st = Closed;
 	bool was_open = false;
 	bool auto_reconnect = true;
+	bool loopback = false;		/* open on the virtual loopback port */
+	QByteArray looped;		/* written, not yet received back */
 };

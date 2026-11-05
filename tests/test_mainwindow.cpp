@@ -296,6 +296,24 @@ main(int argc, char *argv[])
 	/* Destroyed with the screen holding the keyboard. */
 	delete w;
 
+	/* On the loopback port, keys come back to the screen: typed, cooked,
+	 * echoed and drawn by the firmware, with no board at all. */
+	w = new MainWindow(Link::LOOPBACK);
+	w->show();
+	spin(200);
+	screen = w->findChild<Screen *>();
+	CHECK(screen != nullptr);
+	if (screen != nullptr) {
+		screen->setFocus();
+		spin(50);
+		key(screen, kVK_ANSI_H, Qt::NoModifier);
+		key(screen, kVK_ANSI_I, Qt::ShiftModifier);
+		spin(200);
+		screen->selectAll();
+		CHECK(screen->selectedText().startsWith("hI"));
+	}
+	delete w;
+
 	close(board);
 	if (failures == 0)
 		printf("test_mainwindow: all passed\n");

@@ -293,6 +293,51 @@ test_no_auto_reconnect(const QString &node)
 	board.unplug();
 }
 
+/* The virtual loopback plug: open at once with no device, everything
+ * written comes back -- in order, and only from the event loop, never
+ * inside the write -- and it is never lost or polled for. */
+static void
+test_loopback()
+{
+	Link link;
+	Events ev;
+
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	link.open(Link::LOOPBACK);
+	CHECK(link.state() == Link::Open);
+	CHECK(ev.connects == 1 && ev.reconnects == 0);
+	CHECK(link.portName() == Link::LOOPBACK);
+
+	link.write("abc");
+	link.write(QByteArray("\x1B\x40\x00", 3));	/* binary passes too */
+	CHECK(ev.rx.isEmpty());				/* not inside write */
+	CHECK(wait_for([&] { return ev.rx.size() == 6; }));
+	CHECK(ev.rx == QByteArray("abc\x1B\x40\x00", 6));
+
+	idle(10 * POLL_MS);				/* nothing to lose */
+	CHECK(link.state() == Link::Open);
+	CHECK(ev.losses == 0);
+
+	/* Closed, it echoes nothing, not even what was queued. */
+	ev.rx.clear();
+	link.write("late");
+	link.close();
+	link.write("after");
+	idle(5 * POLL_MS);
+	CHECK(ev.rx.isEmpty());
+	CHECK(link.state() == Link::Closed);
+
+	/* Reopened, it echoes what is written now -- nothing left over from
+	 * before the close, and nothing stuck behind it. */
+	link.open(Link::LOOPBACK);
+	link.write("again");
+	CHECK(wait_for([&] { return !ev.rx.isEmpty(); }));
+	idle(5 * POLL_MS);
+	CHECK(ev.rx == "again");
+	link.close();
+}
+
 /* A user's Disconnect is final: the board coming back does not reopen it. */
 static void
 test_close_stops_reconnecting(const QString &node)
@@ -335,6 +380,7 @@ main(int argc, char *argv[])
 	test_loss_seen_by_port_error(node);
 	test_close_stops_reconnecting(node);
 	test_no_auto_reconnect(node);
+	test_loopback();
 
 	if (failures == 0)
 		printf("test_link: all passed\n");

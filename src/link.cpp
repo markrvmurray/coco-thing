@@ -10,6 +10,8 @@
 
 static const int POLL_MS = 500;
 
+const QString Link::LOOPBACK = QStringLiteral("Loopback");
+
 Link::Link(QObject *parent)
 	: QObject(parent)
 {
@@ -32,6 +34,14 @@ Link::open(const QString &name)
 	close();
 	wanted = name;
 	was_open = false;
+	if (name == LOOPBACK) {
+		// Nothing to find, lose or wait for: open now.
+		loopback = true;
+		was_open = true;
+		setState(Open);
+		emit connected(false);
+		return;
+	}
 	poll.start();
 	tryOpen();
 	if (st != Open) {
@@ -56,6 +66,8 @@ Link::close()
 	poll.stop();
 	if (port.isOpen())
 		port.close();
+	loopback = false;
+	looped.clear();
 	wanted.clear();
 	error.clear();
 	setState(Closed);
@@ -64,8 +76,29 @@ Link::close()
 void
 Link::write(const QByteArray &bytes)
 {
-	if (st == Open)
+	if (st != Open)
+		return;
+	if (!loopback) {
 		port.write(bytes);
+		return;
+	}
+	// Straight back, as received data. Delivered from the event loop, as
+	// a real port's input is, so a write never re-enters the reader; and
+	// queued, so order is kept across writes made before it runs. The
+	// handshake lines are tied: nothing here ever waits for clear to send.
+	if (looped.isEmpty())
+		QTimer::singleShot(0, this, &Link::echo);
+	looped += bytes;
+}
+
+void
+Link::echo()
+{
+	if (!loopback || looped.isEmpty())
+		return;
+	const QByteArray bytes = looped;
+	looped.clear();
+	emit received(bytes);
 }
 
 void

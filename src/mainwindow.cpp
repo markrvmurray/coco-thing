@@ -279,7 +279,8 @@ MainWindow::fitWindow()
 void
 MainWindow::choosePort()
 {
-	QStringList names;
+	// The loopback plug first: always there, needing no board.
+	QStringList names = { Link::LOOPBACK };
 	int preferred = 0;
 
 	for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts()) {
