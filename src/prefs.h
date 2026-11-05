@@ -26,9 +26,10 @@ struct Prefs {
 	bool smooth = true;
 
 	/* The text area: match the Term descriptor's IT.COL x IT.ROW, which is
-	 * what SS.ScSiz tells programs (see Terminal::setTextArea). */
-	int text_cols = 80;
-	int text_rows = 25;
+	 * what SS.ScSiz tells programs (see Terminal::setTextArea). The default
+	 * is the whole panel, 128x30. */
+	int text_cols = 128;
+	int text_rows = 30;
 
 	/* Lines kept after they scroll off the top; 0 keeps none. Each holds
 	 * its pixels, about 10 KB at 80 columns, hence the dialog's ceiling. */
