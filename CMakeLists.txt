@@ -10,7 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # The display and the byte-stream interpreter are the pico-thing-video
 # firmware's own PORTABLE translation units, compiled unchanged from its tree
 # (as usim does), so this terminal draws exactly what the DVI console draws.
-set(PICOVIDEO "$ENV{HOME}/Documents/PICO/pico-thing-video" CACHE PATH
+set(PICOVIDEO "$ENV{HOME}/GitHub/PICO/pico-thing-video" CACHE PATH
     "pico-thing-video firmware tree")
 if(NOT EXISTS "${PICOVIDEO}/src/video_render.cpp")
     message(FATAL_ERROR "PICOVIDEO=${PICOVIDEO} is not a pico-thing-video tree")
