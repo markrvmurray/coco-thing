@@ -158,9 +158,9 @@ PrefsDialog::displayTab(const Prefs &p)
 	    "descriptor's size (IT.COL \u00D7 IT.ROW; 80 \u00D7 25 for the "
 	    "Pico-Thing's Term). Programs are told that size, and some, such as "
 	    "minted, send each screen row at exactly that width and rely on the "
-	    "terminal wrapping there. 128 \u00D7 30 uses the whole panel; "
-	    "anything smaller is a window in its top left corner, with the rest "
-	    "shown grey. A change clears the screen and the scroll-back.");
+	    "terminal wrapping there. Only the text area is shown, scaled to the "
+	    "window; 128 \u00D7 30 is the whole panel. A change clears the "
+	    "screen and the scroll-back.");
 	note->setWordWrap(true);
 
 	scrollback = new QSpinBox;

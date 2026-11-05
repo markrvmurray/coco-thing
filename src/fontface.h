@@ -40,6 +40,7 @@ QByteArray fontface_render(const QFont &font, bool keep_box);
 QByteArray fontface_load(const QString &path, QString *error);
 QByteArray fontface_parse(const QByteArray &file, QString *error);
 
-/* Text drawn with a face, for previews: fg on bg, one pixel per bit. */
+/* Text drawn with a face, one pixel per bit: fg on bg, either of which may
+ * be transparent (the image has an alpha channel). */
 QImage fontface_sample(const QByteArray &face, const QString &text,
     QRgb fg, QRgb bg);

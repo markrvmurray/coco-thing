@@ -1,8 +1,8 @@
 /*
  * test_screen.cpp
  *
- * The panel outside the text area is shown grey, whatever the framebuffer
- * holds there, and exactly up to the area's edge at any scale.
+ * Only the text area is shown, filling the widget at any scale; the rest of
+ * the panel, whatever the framebuffer holds there, is not.
  */
 
 #include <cstdio>
@@ -30,17 +30,27 @@ static int failures;
 
 static const QRgb RED = qRgb(255, 0, 0);	/* RGB332 $E0 */
 
+static const QRgb BLUE = qRgb(0, 0, 255);	/* RGB332 $03 */
+static const QRgb BLACK = qRgb(0, 0, 0);
+
+/* The screen at `scale` times its text area's size. */
 static QImage
 shot(Screen &s, int scale)
 {
-	s.resize(FB_WIDTH * scale, FB_HEIGHT * scale);
+	s.resize(s.sizeHint() * scale);
 	return s.grab().toImage();
 }
 
-static bool
-grey(const QImage &img, int x, int y)
+/* How many pixels of the image are `colour`. */
+static int
+count(const QImage &img, QRgb colour)
 {
-	return img.pixel(x, y) == Screen::UNUSED.rgb();
+	int n = 0;
+
+	for (int y = 0; y < img.height(); y++)
+		for (int x = 0; x < img.width(); x++)
+			n += img.pixel(x, y) == colour;
+	return n;
 }
 
 /* A cell's centre in the widget, at whole-multiple scale k. */
@@ -242,25 +252,47 @@ main(int argc, char *argv[])
 	QApplication app(argc, argv);
 	Screen s;
 
-	/* Every framebuffer pixel red, so anything grey came from the screen. */
-	memset(video_framebuffer, 0xE0, sizeof(video_framebuffer));
+	/* Red inside an 80x25 text area, blue on the rest of the panel. */
+	memset(video_framebuffer, 0x03, sizeof(video_framebuffer));
+	for (int y = 0; y < 25 * CHAR_H; y++)
+		memset(video_framebuffer[y], 0xE0, 80 * CHAR_W);
 	s.setScaling(true, false);
 
-	/* The whole panel: nothing grey. */
+	/* The whole panel: both shown. */
 	QImage img = shot(s, 1);
-	CHECK(img.pixel(900, 100) == RED);
-	CHECK(img.pixel(1023, 479) == RED);
+	CHECK(img.size() == QSize(FB_WIDTH, FB_HEIGHT));
+	CHECK(img.pixel(100, 100) == RED);
+	CHECK(img.pixel(900, 100) == BLUE);
 
-	/* 80x25: 640x400 pixels in the top left corner, the rest grey. */
+	/* 80x25: the text area fills the widget, and nothing outside it is
+	 * shown, at 1x and 2x. */
 	s.setTextArea(80, 25);
+	CHECK(s.sizeHint() == QSize(640, 400));
 	for (int k = 1; k <= 2; k++) {
 		img = shot(s, k);
-		CHECK(img.pixel(0, 0) == RED);
-		CHECK(img.pixel(639 * k, 399 * k) == RED);
-		CHECK(grey(img, 640 * k, 0));		/* right of it */
-		CHECK(grey(img, 0, 400 * k));		/* below it */
-		CHECK(grey(img, 1023 * k, 479 * k));
+		CHECK(count(img, RED) == img.width() * img.height());
+		CHECK(count(img, BLUE) == 0);
 	}
+
+	/* A wider widget: the area keeps its shape, anchored at the top
+	 * left -- no margin there -- with the spare space at the right. */
+	s.resize(640 * 2 + 200, 400 * 2);
+	img = s.grab().toImage();
+	CHECK(img.pixel(0, 0) == RED);
+	CHECK(img.pixel(0, 400) == RED);
+	CHECK(img.pixel(640 * 2 - 1, 400) == RED);
+	CHECK(img.pixel(640 * 2 + 1, 400) == BLACK);
+	CHECK(count(img, BLUE) == 0);
+
+	/* The size with no spare space: the area's shape at that height, or a
+	 * whole multiple of the area under whole-multiple scaling. */
+	s.setScaling(false, false);
+	CHECK(s.fittedSize(800) == QSize(1280, 800));
+	CHECK(s.fittedSize(500) == QSize(800, 500));
+	s.setScaling(true, false);
+	CHECK(s.fittedSize(800) == QSize(1280, 800));
+	CHECK(s.fittedSize(799) == QSize(640, 400));
+	CHECK(s.fittedSize(100) == QSize(640, 400));
 
 	s.setTextArea(TEXT_COLS, TEXT_ROWS);
 	test_selection(s);

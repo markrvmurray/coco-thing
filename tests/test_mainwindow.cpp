@@ -17,11 +17,18 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSettings>
+#include <QTabBar>
+#include <QTabWidget>
+#include <QTemporaryDir>
 
+#include "fontface.h"
 #include "mainwindow.h"
 #include "screen.h"
 #include "video.h"
@@ -65,17 +72,16 @@ action(QWidget *w, const QString &text)
 }
 
 /* Cell (col, row)'s centre in the screen widget, by the screen's own rule:
- * the panel fitted to the widget with its aspect ratio kept, centred. */
+ * the text area (its size hint) fitted to the widget with its aspect ratio
+ * kept, anchored at the top left. */
 static QPointF
 centre(QWidget *screen, int col, int row)
 {
-	const QSize fit = QSize(FB_WIDTH, FB_HEIGHT).scaled(screen->size(),
-	    Qt::KeepAspectRatio);
-	const qreal k = (qreal)fit.width() / FB_WIDTH;
+	const QSize area = screen->sizeHint();
+	const QSize fit = area.scaled(screen->size(), Qt::KeepAspectRatio);
+	const qreal k = (qreal)fit.width() / area.width();
 
-	return QPointF((screen->width() - fit.width()) / 2 +
-	    (col * CHAR_W + CHAR_W / 2) * k,
-	    (screen->height() - fit.height()) / 2 +
+	return QPointF((col * CHAR_W + CHAR_W / 2) * k,
 	    (row * CHAR_H + CHAR_H / 2) * k);
 }
 
@@ -106,10 +112,35 @@ main(int argc, char *argv[])
 	QApplication::setAttribute(Qt::AA_MacDontSwapCtrlAndMeta);
 	QApplication app(argc, argv);
 
-	/* Settings of its own, so the user's are never read or touched. */
+	/* Settings of its own, in a directory that goes when the test does:
+	 * the user's are never read or touched, and nothing is left in their
+	 * Library. */
+	QTemporaryDir settings_dir;
+	QSettings::setDefaultFormat(QSettings::IniFormat);
+	QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
+	    settings_dir.path());
 	QApplication::setOrganizationName("coco-thing-test");
 	QApplication::setApplicationName("test_mainwindow");
-	QSettings().clear();
+
+	/* A face of solid cells, as the font in Preferences, so the tab's
+	 * title can be told apart from one in the built-in face. */
+	const QString face_path = settings_dir.filePath("solid.fnt");
+	{
+		QFile f(face_path);
+		CHECK(f.open(QIODevice::WriteOnly));
+		CHECK(f.write(QByteArray(FONTFACE_BYTES, (char)0xFF)) ==
+		    FONTFACE_BYTES);
+	}
+	QSettings().setValue("font/source", 2);	/* Prefs::FontFile */
+	QSettings().setValue("font/file", face_path);
+
+	/* A window saved far wider than the text's shape, as one saved when
+	 * the whole panel was shown would be. */
+	{
+		QWidget wide;
+		wide.resize(1468, 860);
+		QSettings().setValue("window/geometry", wide.saveGeometry());
+	}
 
 	const int board = posix_openpt(O_RDWR | O_NOCTTY);
 	if (board < 0 || grantpt(board) != 0 || unlockpt(board) != 0) {
@@ -207,10 +238,64 @@ main(int argc, char *argv[])
 	CHECK(screen->scrolledBack() == 0);
 	drain(board);
 
+	/* The window fits the text: no spare space beside it, at start-up
+	 * (whatever size was saved) and after a resize, on request. */
+	CHECK(screen->size() == screen->fittedSize(screen->height()));
+	w->resize(w->width() + 300, w->height());
+	spin(50);
+	CHECK(screen->size() != screen->fittedSize(screen->height()));
+	QAction *fit = action(w, "Fit Window to Text");
+	CHECK(fit != nullptr);
+	if (fit != nullptr)
+		fit->trigger();
+	spin(50);
+	CHECK(screen->size() == screen->fittedSize(screen->height()));
+
+	/* The frame's tab names the port, and says when it is closed. */
+	QTabWidget *tabs = w->findChild<QTabWidget *>();
+	CHECK(tabs != nullptr && tabs->count() == 1);
+	QLabel *title = w->findChild<QLabel *>("tabTitle");
+	CHECK(title != nullptr);
+	if (tabs != nullptr && title != nullptr) {
+		const QString dev = QFileInfo(ptsname(board)).fileName();
+		CHECK(title->accessibleName() == dev);
+		CHECK(tabs->tabToolTip(0) == QString(ptsname(board)));
+		CHECK(tabs->tabBar()->tabButton(0, QTabBar::LeftSide) == title);
+		CHECK(title->isVisible());
+
+		/* Drawn in the screen's face, 8x16 a character, inked where
+		 * the face's glyphs are and nowhere else -- and smaller than a
+		 * row of the screen. */
+		const QPixmap pm = title->pixmap();
+		const QSize logical = pm.deviceIndependentSize().toSize();
+		CHECK(logical == QSize(dev.size() * 8, 16));
+		CHECK(16 < screen->height() / 25);
+		QString error;
+		const QImage want = fontface_sample(
+		    fontface_load(face_path, &error), dev,
+		    qRgb(255, 255, 255), qRgba(0, 0, 0, 0));
+		const QImage got = pm.toImage().scaled(want.size());
+		bool same = !want.isNull();
+		for (int y = 0; same && y < want.height(); y++)
+			for (int x = 0; same && x < want.width(); x++)
+				same = (qAlpha(want.pixel(x, y)) > 0) ==
+				    (qAlpha(got.pixel(x, y)) > 0);
+		CHECK(same);
+
+		CHECK(!tabs->tabBar()->hasFocus() && screen->hasFocus());
+		QAction *disconnect = action(w, "&Disconnect");
+		CHECK(disconnect != nullptr);
+		if (disconnect != nullptr)
+			disconnect->trigger();
+		spin(50);
+		CHECK(title->accessibleName() == "Not connected");
+		CHECK(title->pixmap().deviceIndependentSize().toSize() ==
+		    QSize(13 * 8, 16));
+	}
+
 	/* Destroyed with the screen holding the keyboard. */
 	delete w;
 
-	QSettings().clear();
 	close(board);
 	if (failures == 0)
 		printf("test_mainwindow: all passed\n");

@@ -267,7 +267,7 @@ fontface_sample(const QByteArray &face, const QString &text, QRgb fg, QRgb bg)
 	const QByteArray use = face.isEmpty() ? fontface_builtin() : face;
 	const QList<uint> chars = text.toUcs4();
 	QImage img(qMax(1, (int)chars.size()) * 8, FONTFACE_ROWS,
-	    QImage::Format_RGB32);
+	    QImage::Format_ARGB32);
 
 	img.fill(bg);
 	for (int i = 0; i < chars.size(); i++) {

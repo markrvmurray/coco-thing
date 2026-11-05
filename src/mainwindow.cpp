@@ -9,13 +9,17 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QMenuBar>
 #include <QSerialPortInfo>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTabBar>
+#include <QtMath>
 
+#include "fontface.h"
 #include "fw_platform.h"
 #include "prefsdialog.h"
 #include "screentext.h"
@@ -52,16 +56,26 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 {
 	setWindowTitle("coco-thing");
 
-	// The screen, with the scroll-back's scroll bar beside it.
-	QWidget *central = new QWidget(this);
-	QHBoxLayout *row = new QHBoxLayout(central);
+	// The screen, with the scroll-back's scroll bar beside it, framed by
+	// a tab widget's pane: its one tab names the port. The tab bar never
+	// takes the keyboard, so Tab and the arrows stay with the board.
+	QWidget *page = new QWidget;
+	QHBoxLayout *row = new QHBoxLayout(page);
 	row->setContentsMargins(0, 0, 0, 0);
 	row->setSpacing(0);
-	screen = new Screen(central);
-	scroll_bar = new QScrollBar(Qt::Vertical, central);
+	screen = new Screen(page);
+	scroll_bar = new QScrollBar(Qt::Vertical, page);
 	row->addWidget(screen, 1);
 	row->addWidget(scroll_bar);
-	setCentralWidget(central);
+	tabs = new QTabWidget(this);
+	tabs->addTab(page, QString());
+	tabs->setFocusPolicy(Qt::NoFocus);
+	tabs->tabBar()->setFocusPolicy(Qt::NoFocus);
+	// The tab's title is drawn in the screen's own face, so it is a
+	// picture in the tab rather than its text.
+	tab_label = new QLabel;
+	tab_label->setObjectName("tabTitle");
+	setCentralWidget(tabs);
 	screen->setFocus();
 
 	screen->setTerminal(&terminal);
@@ -108,6 +122,9 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	view->addAction("Scroll to Bottom", shortcut(Qt::Key_End), this,
 	    [this] { screen->scrollToBottom(); });
 	view->addSeparator();
+	view->addAction("Fit Window to Text", shortcut(Qt::Key_0), this,
+	    &MainWindow::fitWindow);
+	view->addSeparator();
 	view->addAction("Clear Scroll-back", this, [this] {
 		screen->clearSelection();
 		terminal.clearScrollback();
@@ -132,6 +149,9 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 
 	prefs = Prefs::load();
 	applyPrefs();
+	// Once shown and laid out: a saved size from another text area or
+	// scaling would leave spare space beside the text.
+	QTimer::singleShot(0, this, &MainWindow::fitWindow);
 
 	QString name = port_name;
 	if (name.isEmpty() && prefs.connect_at_start)
@@ -149,6 +169,41 @@ MainWindow::~MainWindow()
 	// screen loose first, so nothing reaches a member that has gone.
 	screen->setKeyboard(nullptr);
 	disconnect(screen, nullptr, this, nullptr);
+}
+
+/* The tab's title in the screen's face at its own size, 8x16 a character:
+ * smaller than the screen, which scales it up. Each face pixel becomes
+ * whole device pixels, so it stays sharp on a Retina display. Coloured as
+ * the tab bar's text, on nothing. */
+void
+MainWindow::renderTab()
+{
+	const QColor fg = tabs->tabBar()->palette().color(QPalette::WindowText);
+	const QImage img = fontface_sample(face, tab_text, fg.rgba(),
+	    qRgba(0, 0, 0, 0));
+	const int k = qMax(1, qCeil(devicePixelRatioF()));
+	QPixmap pm = QPixmap::fromImage(img.scaled(img.size() * k,
+	    Qt::IgnoreAspectRatio, Qt::FastTransformation));
+
+	pm.setDevicePixelRatio(k);
+	tab_label->setPixmap(pm);
+	tab_label->setAccessibleName(tab_text);
+	tab_label->adjustSize();
+	// Set afresh so the bar measures the tab again: setting the same
+	// widget a second time would hide it.
+	tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, nullptr);
+	tabs->tabBar()->setTabButton(0, QTabBar::LeftSide, tab_label);
+}
+
+/* A light/dark switch or a move to a screen of another pixel density:
+ * draw the tab's title again to match. */
+void
+MainWindow::changeEvent(QEvent *ev)
+{
+	QMainWindow::changeEvent(ev);
+	if (ev->type() == QEvent::PaletteChange ||
+	    ev->type() == QEvent::DevicePixelRatioChange)
+		renderTab();
 }
 
 void
@@ -182,20 +237,43 @@ MainWindow::applyPrefs()
 		statusBar()->showMessage(QString("Font: %1; using the built-in "
 		    "face").arg(error));
 	terminal.setFace(face);
+	this->face = face;
+	renderTab();
 
 	// A new text area means a new window, which starts clear.
+	bool reshaped = false;
 	if (prefs.text_cols != terminal.textCols() ||
 	    prefs.text_rows != terminal.textRows()) {
 		terminal.setTextArea(prefs.text_cols, prefs.text_rows);
 		terminal.reset();
 		screen->setTextArea(terminal.textCols(), terminal.textRows());
+		reshaped = true;
 	}
 
 	terminal.setScrollbackLimit(prefs.scrollback_lines);
 	screen->scrollBy(0);		/* re-clamp to what is left */
-	screen->setScaling(prefs.scaling == Prefs::ScaleInteger, prefs.smooth);
+	reshaped = reshaped || (prefs.scaling == Prefs::ScaleInteger) !=
+	    screen_integer;
+	screen_integer = prefs.scaling == Prefs::ScaleInteger;
+	screen->setScaling(screen_integer, prefs.smooth);
 	link.setAutoReconnect(prefs.auto_reconnect);
 	screen->update();
+	if (reshaped && isVisible())
+		fitWindow();
+}
+
+/* Resize the window so the screen has no spare space beside or below the
+ * text: keep its height and give it the width the text's shape wants. The
+ * screen takes all of a size change (the bars and the frame are fixed), so
+ * the window changes by the same amount. A maximised or full-screen window
+ * is the system's to size. */
+void
+MainWindow::fitWindow()
+{
+	if (isMaximized() || isFullScreen())
+		return;
+	const QSize want = screen->fittedSize(screen->height());
+	resize(size() + (want - screen->size()));
 }
 
 void
@@ -363,4 +441,27 @@ MainWindow::showState()
 		s += QString("   scrolled back %1 of %2 lines")
 		    .arg(screen->scrolledBack()).arg(terminal.historySize());
 	state->setText(s);
+
+	// The tab names the port, by its device name (a full path is in the
+	// tool tip), and says when it is not connected.
+	const QString port = QFileInfo(link.portName()).fileName();
+	QString tab;
+	switch (link.state()) {
+	case Link::Closed:
+		tab = port.isEmpty() ? QString("Not connected") :
+		    QString("%1 (closed)").arg(port);
+		break;
+	case Link::Waiting:
+		tab = QString("%1 (waiting)").arg(port);
+		break;
+	case Link::Open:
+		tab = port;
+		break;
+	}
+	if (tab != tab_text) {
+		tab_text = tab;
+		tabs->setTabToolTip(0, link.portName().isEmpty() ? tab :
+		    link.portName());
+		renderTab();
+	}
 }

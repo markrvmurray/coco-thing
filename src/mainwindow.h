@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QMainWindow>
 #include <QScrollBar>
+#include <QTabWidget>
 #include <QTimer>
 
 #include "keyboard.h"
@@ -28,6 +29,7 @@ public:
 
 protected:
 	void closeEvent(QCloseEvent *ev) override;
+	void changeEvent(QEvent *ev) override;
 
 private slots:
 	void choosePort();
@@ -43,6 +45,8 @@ private slots:
 	void paste();
 	void selectAll();
 	void syncScrollBar();
+	void fitWindow();
+	void renderTab();
 
 private:
 	void showState();
@@ -50,6 +54,10 @@ private:
 
 	Screen *screen;
 	QScrollBar *scroll_bar;
+	QTabWidget *tabs;	/* one tab: the port, framing the screen */
+	QLabel *tab_label;	/* its title, drawn in the screen's face */
+	QString tab_text;
+	QByteArray face;	/* the screen's face; empty = built-in */
 	Terminal terminal;
 	Link link;
 	Keyboard keyboard;
@@ -58,4 +66,5 @@ private:
 	QLabel *state;
 	Prefs prefs;
 	QByteArray pasting;	/* pasted bytes still to send */
+	bool screen_integer = false;	/* whole-multiple scaling in force */
 };

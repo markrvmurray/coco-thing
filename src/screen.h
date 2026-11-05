@@ -1,11 +1,14 @@
 /*
  * screen.h
  *
- * Shows the firmware's 1024x480 RGB332 framebuffer, scaled to the widget
- * with the aspect ratio kept, and hands its key events to a Keyboard. The
- * mouse selects text in the text area, as in any terminal: a drag selects
- * from cell to cell, running to the end of each row between, and a
- * double-click selects the word under the pointer.
+ * Shows the text area -- the part of the firmware's 1024x480 RGB332
+ * framebuffer the board's programs can draw in, in its top left corner --
+ * scaled to the widget with the aspect ratio kept and anchored at the top
+ * left (any spare space is at the right or the bottom, as in any terminal),
+ * and hands its key events to a Keyboard. The rest of the panel is out of
+ * use and not shown. The mouse selects text in the text area, as in any
+ * terminal: a drag selects from cell to cell, running to the end of each row
+ * between, and a double-click selects the word under the pointer.
  *
  * The view can be scrolled back into the Terminal's history (the wheel or
  * trackpad, or scrollBy()). History rows are drawn from the pixels kept when
@@ -26,19 +29,20 @@ class Screen : public QWidget {
 	Q_OBJECT
 
 public:
-	/* The colour of the panel outside the text area. */
-	static const QColor UNUSED;
-
 	explicit Screen(QWidget *parent = nullptr);
 
 	QSize sizeHint() const override;
+
+	/* The size this screen would be at `height` with no spare space: the
+	 * text area's shape, at a whole multiple of it under whole-multiple
+	 * scaling. What the window resizes to, to fit. */
+	QSize fittedSize(int height) const;
 
 	/* Integer: scale by whole multiples only, so every pixel is the same
 	 * size. Smooth: filter when the scale is not a whole multiple. */
 	void setScaling(bool integer, bool smooth);
 
-	/* The text area in the top left corner of the panel; the rest of the
-	 * panel is out of use and shown grey. */
+	/* The text area, in the top left corner of the panel: what is shown. */
 	void setTextArea(int cols, int rows);
 
 	/* Where scroll-back and the text of lines come from. */
@@ -100,9 +104,9 @@ private:
 		bool operator!=(const Pos &o) const { return !(*this == o); }
 	};
 
-	/* Where the panel is drawn in the widget, and the text-area cell under
-	 * a widget position (clamped into the area). */
-	QRect panelRect() const;
+	/* Where the text area is drawn in the widget, and the cell under a
+	 * widget position (clamped into the area). */
+	QRect areaRect() const;
 	Pos cellAt(const QPointF &pos) const;
 	/* The selection's ends in reading order. */
 	void ordered(Pos &from, Pos &to) const;

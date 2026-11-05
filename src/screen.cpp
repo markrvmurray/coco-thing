@@ -17,8 +17,6 @@
 #include "video.h"
 #include "video_render.h"
 
-const QColor Screen::UNUSED(0x55, 0x55, 0x55);
-
 Screen::Screen(QWidget *parent)
 	: QWidget(parent)
 {
@@ -47,7 +45,7 @@ Screen::Screen(QWidget *parent)
 QSize
 Screen::sizeHint() const
 {
-	return QSize(FB_WIDTH, FB_HEIGHT);
+	return area;
 }
 
 void
@@ -62,19 +60,27 @@ void
 Screen::setTextArea(int cols, int rows)
 {
 	area = QSize(cols * CHAR_W, rows * CHAR_H).boundedTo(image.size());
+	updateGeometry();
 	clearSelection();
 }
 
 QRect
-Screen::panelRect() const
+Screen::areaRect() const
 {
-	QSize fit = image.size().scaled(size(), Qt::KeepAspectRatio);
-	const int whole = qMin(width() / FB_WIDTH, height() / FB_HEIGHT);
+	QSize fit = area.scaled(size(), Qt::KeepAspectRatio);
+	const int whole = qMin(width() / area.width(), height() / area.height());
 	if (integer && whole >= 1)
-		fit = image.size() * whole;
+		fit = area * whole;
 
-	return QRect(QPoint((width() - fit.width()) / 2,
-	    (height() - fit.height()) / 2), fit);
+	return QRect(QPoint(0, 0), fit);
+}
+
+QSize
+Screen::fittedSize(int h) const
+{
+	if (integer)
+		return area * qMax(1, h / area.height());
+	return QSize(qRound((qreal)h * area.width() / area.height()), h);
 }
 
 void
@@ -154,9 +160,9 @@ Screen::pageRows() const
 Screen::Pos
 Screen::cellAt(const QPointF &pos) const
 {
-	const QRect panel = panelRect();
-	const qreal x = (pos.x() - panel.left()) * FB_WIDTH / panel.width();
-	const qreal y = (pos.y() - panel.top()) * FB_HEIGHT / panel.height();
+	const QRect shown = areaRect();
+	const qreal x = (pos.x() - shown.left()) * area.width() / shown.width();
+	const qreal y = (pos.y() - shown.top()) * area.height() / shown.height();
 	Pos p;
 
 	p.col = qBound(0, (int)(x / CHAR_W), areaCols() - 1);
@@ -273,8 +279,7 @@ Screen::wheelEvent(QWheelEvent *ev)
 {
 	// A trackpad reports pixels, a wheel notches of 1/8 degree (120 a
 	// notch, three lines a notch, as elsewhere). Up scrolls back.
-	const QRect panel = panelRect();
-	const qreal row_px = (qreal)CHAR_H * panel.height() / FB_HEIGHT;
+	const qreal row_px = (qreal)areaRect().height() / areaRows();
 
 	if (!ev->pixelDelta().isNull())
 		wheel_rest += ev->pixelDelta().y() / row_px;
@@ -305,15 +310,18 @@ Screen::paintEvent(QPaintEvent *)
 
 	p.fillRect(rect(), Qt::black);
 
-	const QRect target = panelRect();
+	const QRect target = areaRect();
 	const QSize fit = target.size();
 	p.setRenderHint(QPainter::SmoothPixmapTransform,
-	    smooth && fit.width() % FB_WIDTH != 0);
+	    smooth && fit.width() % area.width() != 0);
 
-	// Everything below is drawn in panel pixels.
+	// Everything below is drawn in panel pixels, clipped to the text area:
+	// the rest of the panel is not shown.
 	p.translate(target.topLeft());
-	p.scale((qreal)fit.width() / FB_WIDTH, (qreal)fit.height() / FB_HEIGHT);
-	p.drawImage(QRect(0, 0, FB_WIDTH, FB_HEIGHT), image);
+	p.scale((qreal)fit.width() / area.width(),
+	    (qreal)fit.height() / area.height());
+	p.setClipRect(QRect(QPoint(0, 0), area));
+	p.drawImage(QRect(QPoint(0, 0), area), image, QRect(QPoint(0, 0), area));
 
 	// Scrolled back: the text area shows lines from the history, as they
 	// looked when they scrolled off, above the top of the live screen.
@@ -342,14 +350,6 @@ Screen::paintEvent(QPaintEvent *)
 			p.drawImage(dst, strip);
 		}
 	}
-
-	// Drawn over the framebuffer at every paint, so nothing the board
-	// sends -- a clear, graphics with the window's clip lifted -- can
-	// paint the unused part of the panel.
-	p.fillRect(QRect(area.width(), 0, FB_WIDTH - area.width(), FB_HEIGHT),
-	    UNUSED);
-	p.fillRect(QRect(0, area.height(), area.width(),
-	    FB_HEIGHT - area.height()), UNUSED);
 
 	// The selection, in reverse video: each row from its first selected
 	// cell to its last.
