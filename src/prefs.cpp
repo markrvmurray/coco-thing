@@ -37,23 +37,40 @@ Prefs::load()
 	return p;
 }
 
+/* Store a setting only while it differs from its default, and forget it once
+ * it is back there. A value the user never changed then follows the
+ * default when a new version changes it, rather than staying pinned to the
+ * default of the version that first saved it. */
+template <typename T> static void
+put(QSettings &s, const char *key, const T &value, const T &fallback)
+{
+	if (value == fallback)
+		s.remove(key);
+	else
+		s.setValue(key, value);
+}
+
 void
 Prefs::save() const
 {
 	QSettings s;
+	const Prefs d;
 
-	s.setValue("font/source", font_source);
-	s.setValue("font/family", font_family);
-	s.setValue("font/file", font_file);
-	s.setValue("font/keep_box", keep_box_glyphs);
-	s.setValue("display/scaling", scaling);
-	s.setValue("display/smooth", smooth);
-	s.setValue("display/text_cols", text_cols);
-	s.setValue("display/text_rows", text_rows);
-	s.setValue("display/scrollback_lines", scrollback_lines);
-	s.setValue("connection/auto_reconnect", auto_reconnect);
-	s.setValue("connection/clear_on_reconnect", clear_on_reconnect);
-	s.setValue("connection/connect_at_start", connect_at_start);
+	put(s, "font/source", (int)font_source, (int)d.font_source);
+	put(s, "font/family", font_family, d.font_family);
+	put(s, "font/file", font_file, d.font_file);
+	put(s, "font/keep_box", keep_box_glyphs, d.keep_box_glyphs);
+	put(s, "display/scaling", (int)scaling, (int)d.scaling);
+	put(s, "display/smooth", smooth, d.smooth);
+	put(s, "display/text_cols", text_cols, d.text_cols);
+	put(s, "display/text_rows", text_rows, d.text_rows);
+	put(s, "display/scrollback_lines", scrollback_lines,
+	    d.scrollback_lines);
+	put(s, "connection/auto_reconnect", auto_reconnect, d.auto_reconnect);
+	put(s, "connection/clear_on_reconnect", clear_on_reconnect,
+	    d.clear_on_reconnect);
+	put(s, "connection/connect_at_start", connect_at_start,
+	    d.connect_at_start);
 }
 
 FaceHeading

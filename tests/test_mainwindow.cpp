@@ -30,6 +30,7 @@
 
 #include "fontface.h"
 #include "mainwindow.h"
+#include "prefs.h"
 #include "screen.h"
 #include "video.h"
 
@@ -106,6 +107,33 @@ drain(int fd)
 	return out;
 }
 
+/* Settings are stored only while they differ from the defaults, so a value
+ * the user never chose follows a new version's default: 80x25 saved by a
+ * version whose default it was must not pin the text area for good. */
+static void
+test_prefs_keep_only_changes()
+{
+	QSettings().clear();
+	Prefs p;
+	p.save();
+	CHECK(QSettings().allKeys().isEmpty());
+
+	p.text_cols = 80;
+	p.text_rows = 25;
+	p.save();
+	CHECK(QSettings().value("display/text_cols").toInt() == 80);
+	CHECK(Prefs::load().text_rows == 25);
+
+	/* Back at the default, the setting is forgotten, not stored. */
+	p.text_cols = Prefs().text_cols;
+	p.text_rows = Prefs().text_rows;
+	p.save();
+	CHECK(!QSettings().contains("display/text_cols"));
+	CHECK(!QSettings().contains("display/text_rows"));
+	CHECK(Prefs::load().text_cols == Prefs().text_cols);
+	QSettings().clear();
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -121,6 +149,8 @@ main(int argc, char *argv[])
 	    settings_dir.path());
 	QApplication::setOrganizationName("coco-thing-test");
 	QApplication::setApplicationName("test_mainwindow");
+
+	test_prefs_keep_only_changes();
 
 	/* A face of solid cells, as the font in Preferences, so the tab's
 	 * title can be told apart from one in the built-in face. */
