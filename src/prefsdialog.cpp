@@ -10,6 +10,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QFontComboBox>
 #include <QFormLayout>
@@ -28,7 +29,7 @@ static const char *PREVIEW_TEXT[] = {
 	"OS-9 Level Two  $1B graphics",
 	"ABCDEFGHIJ abcdefghij 0123456789",
 	"┌──┐ ░▒▓█ £¬ {}[]|~",
-	"└──┘ ☺♥♦♣♠ éüç αβπ",
+	"└──┘ ☺♥♦♣♠ éüç αßπ",	/* CP437 has ß, used for beta */
 };
 
 PrefsDialog::PrefsDialog(const Prefs &p, QWidget *parent)
@@ -95,6 +96,15 @@ PrefsDialog::fontTab(const Prefs &p)
 	font_error->setWordWrap(true);
 	font_error->setStyleSheet("color: #c0392b");
 
+	// The selected face, saved as the firmware's own header (so it can
+	// replace the built-in Spleen) or as a raw face.
+	QPushButton *export_button = new QPushButton("Export\u2026");
+	export_button->setToolTip("Save this face as font_8x16.h, the "
+	    "header the firmware builds its built-in face from, or as a raw "
+	    "4096-byte face.");
+	export_note = new QLabel;
+	export_note->setWordWrap(true);
+
 	QLabel *note = new QLabel("Text cells are fixed at 8×16 pixels by "
 	    "the renderer, so a font changes the shapes of the characters, not "
 	    "their size. A program can still select its own font with the "
@@ -110,12 +120,16 @@ PrefsDialog::fontTab(const Prefs &p)
 	g->addWidget(browse, 2, 2);
 	g->addWidget(keep_box, 3, 1, 1, 2);
 	g->addWidget(preview, 4, 0, 1, 3);
-	g->addWidget(font_error, 5, 0, 1, 3);
-	g->addWidget(note, 6, 0, 1, 3);
-	g->setRowStretch(7, 1);
+	g->addWidget(export_note, 5, 0, 1, 2);
+	g->addWidget(export_button, 5, 2);
+	g->addWidget(font_error, 6, 0, 1, 3);
+	g->addWidget(note, 7, 0, 1, 3);
+	g->setRowStretch(8, 1);
 	g->setColumnStretch(1, 1);
 
 	connect(browse, &QPushButton::clicked, this, &PrefsDialog::browseFont);
+	connect(export_button, &QPushButton::clicked, this,
+	    &PrefsDialog::exportFace);
 	connect(group, &QButtonGroup::buttonToggled, this,
 	    &PrefsDialog::updatePreview);
 	connect(family, &QFontComboBox::currentFontChanged, this,
@@ -260,6 +274,38 @@ PrefsDialog::updatePreview()
 				sheet.setPixel(x, i * 16 + y, line.pixel(x, y));
 	}
 	preview->setPixmap(QPixmap::fromImage(sheet.scaled(sheet.size() * 2)));
+}
+
+void
+PrefsDialog::exportFace()
+{
+	const Prefs p = prefs();
+	QString error;
+	const QByteArray face = p.face(&error);
+
+	if (!error.isEmpty()) {
+		font_error->setText(error);
+		return;
+	}
+
+	const QString header_type = "C header, as the firmware's built-in face "
+	    "(*.h)";
+	const QString raw_type = "Raw 4096-byte face (*.fnt)";
+	QString type = header_type;
+	const QString path = QFileDialog::getSaveFileName(this, "Export Font",
+	    QDir::home().filePath("font_8x16.h"),
+	    header_type + ";;" + raw_type, &type);
+	if (path.isEmpty())
+		return;
+	const bool header = type != raw_type &&
+	    !path.endsWith(".fnt", Qt::CaseInsensitive);
+
+	if (!fontface_export(face, path, header, p.faceHeading(), &error)) {
+		font_error->setText(QString("Could not export: %1").arg(error));
+		return;
+	}
+	font_error->clear();
+	export_note->setText(QString("Exported to %1").arg(path));
 }
 
 void

@@ -101,6 +101,9 @@ add_test(NAME link COMMAND test_link)
 add_executable(test_fontface tests/test_fontface.cpp)
 target_link_libraries(test_fontface PRIVATE termcore)
 add_test(NAME fontface COMMAND test_fontface)
+# The firmware's header is the oracle for exporting a face.
+target_compile_definitions(test_fontface PRIVATE
+    PICOVIDEO_FACE_HEADER="${PICOVIDEO}/include/font_8x16.h")
 set_tests_properties(fontface PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
 add_executable(test_screen tests/test_screen.cpp src/screen.cpp)

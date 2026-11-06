@@ -8,11 +8,14 @@
 #include <cstdio>
 #include <cstring>
 
+#include <QFile>
 #include <QGuiApplication>
+#include <QTemporaryDir>
 #include <QSet>
 
 #include "fontface.h"
-#include "font_spleen_8x16.h"
+#include "prefs.h"
+#include "font_8x16.h"
 
 static int failures;
 
@@ -37,7 +40,7 @@ static bool
 glyph_builtin(const QByteArray &face, int code)
 {
 	return memcmp(face.constData() + code * FONTFACE_ROWS,
-	    font_spleen_8x16[code], FONTFACE_ROWS) == 0;
+	    font_8x16[code], FONTFACE_ROWS) == 0;
 }
 
 static bool
@@ -255,6 +258,133 @@ test_render()
 	CHECK(redrawn > 0);
 }
 
+/* The values in an exported header's array, in order: every 0xNN on each
+ * row before the row's comment. */
+static QByteArray
+header_values(const QByteArray &text)
+{
+	QByteArray out;
+	const int start = text.indexOf("= {");
+	const int end = text.indexOf("};", start);
+
+	for (const QByteArray &line : text.mid(start, end - start).split('\n')) {
+		const QByteArray values = line.left(line.indexOf("/*"));
+		for (int at = values.indexOf("0x"); at >= 0;
+		    at = values.indexOf("0x", at + 2))
+			out.append((char)values.mid(at + 2, 2).toInt(nullptr, 16));
+	}
+	return out;
+}
+
+/* Exporting: the built-in face with Spleen's own title and credits is the
+ * firmware's header byte for byte, so any face exported the same way can
+ * replace it; the values are the face's; a raw export loads back. */
+static void
+test_export()
+{
+	QFile fw(PICOVIDEO_FACE_HEADER);
+	CHECK(fw.open(QIODevice::ReadOnly));
+	const QByteArray real = fw.readAll();
+	const QByteArray made = fontface_header(fontface_builtin(),
+	    fontface_spleen_heading());
+	CHECK(!real.isEmpty());
+	CHECK(made == real);
+
+	/* Another face: every value in order, the generic names, and the
+	 * name, title and credits as given. */
+	QByteArray face(FONTFACE_BYTES, 0);
+	for (int i = 0; i < FONTFACE_BYTES; i++)
+		face[i] = (char)(i * 37 + i / 16);
+	const FaceHeading menlo = { "Menlo", "Menlo 8x16 bitmap font",
+	    { "Drawn by coco-thing from Menlo." } };
+	const QByteArray text = fontface_header(face, menlo);
+	CHECK(header_values(text) == face);
+	CHECK(text.contains("static const uint8_t font_8x16[256][16]"));
+	CHECK(text.contains("\nstatic const char font_8x16_name[] = \"Menlo\";\n"));
+	CHECK(!text.contains("spleen"));
+	CHECK(text.startsWith("/*\n * font_8x16.h -- Menlo 8x16 bitmap "
+	    "font, CP437 (256 glyphs)\n *\n * Drawn by coco-thing from Menlo.\n"));
+	CHECK(text.endsWith(" }  /* 0xFF      */\n};\n"));
+
+	/* A name the string cannot hold as it is: quotes and backslashes
+	 * escaped, a line break dropped. */
+	const QByteArray odd = fontface_header(face,
+	    { "My \"Font\"\\ v2\nx", "Odd", {} });
+	CHECK(odd.contains("font_8x16_name[] = \"My \\\"Font\\\"\\\\ v2x\";\n"));
+
+	/* Raw: the face itself, which loads back as a font file. */
+	QTemporaryDir dir;
+	QString error;
+	const QString raw = dir.filePath("face.fnt");
+	CHECK(fontface_export(face, raw, false, {}, &error));
+	CHECK(fontface_load(raw, &error) == face);
+
+	/* A header file written to disk is the header. */
+	const QString h = dir.filePath("font_8x16.h");
+	CHECK(fontface_export(face, h, true, menlo, &error));
+	QFile hf(h);
+	CHECK(hf.open(QIODevice::ReadOnly) && hf.readAll() == text);
+
+	/* Somewhere it cannot be written: false, with a reason. */
+	error.clear();
+	CHECK(!fontface_export(face, "/nonexistent/dir/face.fnt", false, {},
+	    &error));
+	CHECK(!error.isEmpty());
+}
+
+/* The heading an export gets from each font source: Spleen's own for the
+ * built-in face; for the others, the font's name, where the glyphs came
+ * from and why the names are generic; every line within 80 columns; and
+ * nothing in it able to end the comment. */
+static void
+test_headings()
+{
+	Prefs p;
+	FaceHeading h;
+
+	p.font_source = Prefs::FontBuiltin;
+	h = p.faceHeading();
+	CHECK(h.name == "Spleen 2.2.0");
+	CHECK(h.title == fontface_spleen_heading().title);
+	CHECK(h.credits == fontface_spleen_heading().credits);
+
+	p.font_source = Prefs::FontSystem;
+	p.font_family = "Menlo";
+	for (const bool keep : { true, false }) {
+		p.keep_box_glyphs = keep;
+		h = p.faceHeading();
+		const QString all = h.credits.join('\n');
+		CHECK(h.name == "Menlo");
+		CHECK(h.title == "Menlo 8x16 bitmap font");
+		CHECK(all.contains("\"Menlo\""));
+		CHECK(all.contains("$B0-$DF") == keep);
+		CHECK(all.contains("font_8x16_name says which font it is"));
+	}
+
+	p.font_source = Prefs::FontFile;
+	p.font_file = "/some/where/Lat2-Terminus16.psf";
+	h = p.faceHeading();
+	CHECK(h.name == "Lat2-Terminus16");
+	CHECK(h.title == "Lat2-Terminus16 8x16 bitmap font");
+	CHECK(h.credits.join('\n').contains("\"Lat2-Terminus16.psf\""));
+
+	/* Within 80 columns, whichever source. */
+	for (const auto source : { Prefs::FontBuiltin, Prefs::FontSystem,
+	    Prefs::FontFile }) {
+		p.font_source = source;
+		for (const QByteArray &line :
+		    fontface_header({}, p.faceHeading()).split('\n'))
+			if (line.startsWith(" *") || line.startsWith("/*"))
+				CHECK(line.size() <= 80);
+	}
+
+	/* A family name that would end the comment cannot. */
+	p.font_source = Prefs::FontSystem;
+	p.font_family = "Evil */ int x;";
+	const QByteArray text = fontface_header({}, p.faceHeading());
+	CHECK(text.indexOf("*/") == text.indexOf("*/\n\n#pragma once"));
+}
+
 static void
 test_sample()
 {
@@ -264,7 +394,7 @@ test_sample()
 	CHECK(img.width() == 8 && img.height() == FONTFACE_ROWS);
 	for (int r = 0; r < FONTFACE_ROWS; r++)
 		for (int c = 0; c < 8; c++) {
-			const bool on = font_spleen_8x16['A'][r] & (0x80 >> c);
+			const bool on = font_8x16['A'][r] & (0x80 >> c);
 			CHECK((img.pixel(c, r) == qRgb(255, 255, 255)) == on);
 		}
 }
@@ -281,6 +411,8 @@ main(int argc, char *argv[])
 	test_rejects();
 	test_render();
 	test_sample();
+	test_export();
+	test_headings();
 
 	if (failures == 0)
 		printf("test_fontface: all passed\n");

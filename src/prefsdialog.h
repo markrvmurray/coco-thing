@@ -34,6 +34,7 @@ public slots:
 private slots:
 	void browseFont();
 	void updatePreview();
+	void exportFace();
 
 private:
 	QWidget *fontTab(const Prefs &p);
@@ -48,6 +49,7 @@ private:
 	QCheckBox *keep_box;
 	QLabel *preview;
 	QLabel *font_error;
+	QLabel *export_note;
 
 	QComboBox *scaling;
 	QCheckBox *smooth;

@@ -14,7 +14,7 @@
 #include <QHash>
 #include <QPainter>
 
-#include "font_spleen_8x16.h"
+#include "font_8x16.h"
 
 /* CP437, the order the firmware's face and the guest's bytes both use (the
  * keyboard sends the pound sign as $9C and the not sign as $AA, which is
@@ -47,7 +47,7 @@ fontface_cp437(int code)
 QByteArray
 fontface_builtin()
 {
-	return QByteArray(reinterpret_cast<const char *>(font_spleen_8x16),
+	return QByteArray(reinterpret_cast<const char *>(font_8x16),
 	    FONTFACE_BYTES);
 }
 
@@ -259,6 +259,118 @@ fontface_load(const QString &path, QString *error)
 		return {};
 	}
 	return fontface_parse(f.readAll(), error);
+}
+
+FaceHeading
+fontface_spleen_heading()
+{
+	return {
+		"Spleen 2.2.0",
+		"Spleen 8x16 bitmap font",
+		{
+			"Spleen 2.2.0 by Frederic Cambus",
+			"https://github.com/fcambus/spleen",
+			"BSD 2-Clause license. See LICENSE-spleen for details.",
+		},
+	};
+}
+
+/* The row comment the firmware's header gives each code: the character
+ * itself for printable ASCII, quoted so the comment stays one token. */
+static QByteArray
+row_comment(int code)
+{
+	QByteArray c = QByteArray("0x") +
+	    QByteArray::number(code, 16).toUpper().rightJustified(2, '0');
+
+	if (code == '\\')
+		return c + " '\\\\'";
+	if (code == '\'')
+		return c + "  \"'\"";
+	if (code >= 0x20 && code < 0x7F)
+		return c + "  '" + (char)code + "'";
+	return c + "     ";
+}
+
+/* A string as a C string literal's contents. */
+static QByteArray
+c_string(const QString &s)
+{
+	QByteArray out;
+
+	for (const char ch : s.toUtf8()) {
+		if ((uint8_t)ch < 0x20)
+			continue;	/* a line break would end the literal */
+		if (ch == '"' || ch == '\\')
+			out += '\\';
+		out += ch;
+	}
+	return out;
+}
+
+QByteArray
+fontface_header(const QByteArray &face, const FaceHeading &heading)
+{
+	const QByteArray use = face.size() == FONTFACE_BYTES ? face :
+	    fontface_builtin();
+	QByteArray out;
+
+	out += "/*\n";
+	// The heading is inside a comment, so nothing in it may end one.
+	const auto safe = [](QString t) { return t.replace("*/", "* /").toUtf8(); };
+	out += " * font_8x16.h -- " + safe(heading.title) +
+	    ", CP437 (256 glyphs)\n";
+	out += " *\n";
+	// An empty credit line is a bare " *", with no trailing space.
+	for (const QString &line : heading.credits)
+		out += line.isEmpty() ? QByteArray(" *\n") :
+		    " * " + safe(line) + "\n";
+	out += " *\n";
+	out += " * Layout: font_8x16[char_code][scanline_row]\n";
+	out += " *   Each byte is 8 pixels, MSB = leftmost pixel.\n";
+	out += " *   256 characters, 16 rows each = 4096 bytes total.\n";
+	out += " */\n";
+	out += "\n";
+	out += "#pragma once\n";
+	out += "\n";
+	out += "#include <stdint.h>\n";
+	out += "\n";
+	out += "/* The font's name, as a status line or a log would show it. */\n";
+	out += "static const char font_8x16_name[] = \"" +
+	    c_string(heading.name) + "\";\n";
+	out += "\n";
+	out += "static const uint8_t font_8x16[256][16] = {\n";
+	for (int code = 0; code < FONTFACE_GLYPHS; code++) {
+		out += "    {";
+		for (int row = 0; row < FONTFACE_ROWS; row++) {
+			const uint8_t v = (uint8_t)use[code * FONTFACE_ROWS + row];
+			out += row == 0 ? " " : ", ";
+			out += "0x" + QByteArray::number(v, 16).toUpper()
+			    .rightJustified(2, '0');
+		}
+		out += code == FONTFACE_GLYPHS - 1 ? " }  " : " },  ";
+		out += "/* " + row_comment(code) + " */\n";
+	}
+	out += "};\n";
+	return out;
+}
+
+bool
+fontface_export(const QByteArray &face, const QString &path, bool header,
+    const FaceHeading &heading, QString *error)
+{
+	const QByteArray use = face.size() == FONTFACE_BYTES ? face :
+	    fontface_builtin();
+	const QByteArray data = header ?
+	    fontface_header(use, heading) : use;
+	QFile f(path);
+
+	if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate) ||
+	    f.write(data) != data.size()) {
+		*error = f.errorString();
+		return false;
+	}
+	return true;
 }
 
 QImage

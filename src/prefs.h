@@ -8,6 +8,9 @@
 
 #include <QByteArray>
 #include <QString>
+#include <QStringList>
+
+#include "fontface.h"
 
 struct Prefs {
 	/* Text face: the firmware's own, a system font drawn into the cell,
@@ -45,4 +48,9 @@ struct Prefs {
 	/* The face these preferences select: empty for the built-in one.
 	 * On failure, empty with *error set. */
 	QByteArray face(QString *error) const;
+
+	/* What an exported face's header says about it (see fontface.h): its
+	 * name, its title and where the glyphs came from. The built-in face
+	 * gets Spleen's own, so exporting it reproduces the firmware's file. */
+	FaceHeading faceHeading() const;
 };
