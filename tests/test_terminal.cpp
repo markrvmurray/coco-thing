@@ -312,6 +312,41 @@ test_scrollback(Terminal &t)
 	settle(t);
 }
 
+/* Graphics is its own plane: text scrolling over it moves the text, not the
+ * drawing, and only a clear of the panel ($0C) erases it. */
+static void
+test_scroll_keeps_graphics(Terminal &t)
+{
+	t.setScrollbackLimit(0);
+	t.feed(QByteArray("\x05\x20\x0C", 3));	/* cursor off, clear */
+	settle(t);
+	const uint8_t bg = video_framebuffer[FB_HEIGHT - 1][FB_WIDTH - 1];
+
+	/* A bar well clear of the text that will scroll past it. */
+	t.feed(point(0x40, 600, 200) + point(0x4A, 699, 299));
+	settle(t);
+	CHECK(video_framebuffer[250][650] != bg);
+
+	numbered(t, 0, TEXT_ROWS + 5);			/* scrolls 6 times */
+	vidterm_refresh();
+	CHECK(video_framebuffer[250][650] != bg);
+	CHECK(video_framebuffer[299][699] != bg);
+	CHECK(video_framebuffer[250][701] == bg);
+
+	t.feed(QByteArray("\x0C", 1));
+	settle(t);
+	vidterm_refresh();
+	CHECK(video_framebuffer[250][650] == bg);
+
+	/* Erased for good: text written over its place later does not bring
+	 * it back. */
+	numbered(t, 0, TEXT_ROWS + 1);
+	vidterm_refresh();
+	CHECK(video_framebuffer[250][650] == bg);
+	t.reset();
+	settle(t);
+}
+
 int
 main()
 {
@@ -324,6 +359,7 @@ main()
 	test_text_area_wraps_like_minted(t);
 	test_bell(t);
 	test_scrollback(t);
+	test_scroll_keeps_graphics(t);
 
 	if (failures == 0)
 		printf("test_terminal: all passed\n");
