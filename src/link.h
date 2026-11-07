@@ -63,6 +63,9 @@ public:
 
 signals:
 	void received(const QByteArray &bytes);
+	/* Bytes handed to an open port by write(), as they go. A write to a
+	 * link that is not open sends nothing and says nothing. */
+	void sent(const QByteArray &bytes);
 	/* The port opened. `again` is true when it had been open before
 	 * under this open() -- that is, the board came back. */
 	void connected(bool again);

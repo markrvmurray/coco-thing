@@ -15,6 +15,7 @@
 #include <QMenuBar>
 #include <QSerialPortInfo>
 #include <QSettings>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QtMath>
@@ -65,6 +66,7 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	row->setSpacing(0);
 	screen = new Screen(page);
 	scroll_bar = new QScrollBar(Qt::Vertical, page);
+	scroll_bar->setObjectName("screenScrollBar");
 	row->addWidget(screen, 1);
 	row->addWidget(scroll_bar);
 	tabs = new QTabWidget(this);
@@ -75,7 +77,17 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	// picture in the tab rather than its text.
 	tab_label = new QLabel;
 	tab_label->setObjectName("tabTitle");
-	setCentralWidget(tabs);
+	// The traffic pane goes beside the screen, hidden until the Debug
+	// menu shows it; the screen keeps any space the window gains.
+	traffic = new TrafficPane;
+	traffic->hide();
+	QSplitter *split = new QSplitter(Qt::Horizontal, this);
+	split->addWidget(tabs);
+	split->addWidget(traffic);
+	split->setStretchFactor(0, 1);
+	split->setStretchFactor(1, 0);
+	split->setChildrenCollapsible(false);
+	setCentralWidget(split);
 	screen->setFocus();
 
 	screen->setTerminal(&terminal);
@@ -131,6 +143,12 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 		screen->scrollToBottom();
 	});
 
+	QMenu *debug = menuBar()->addMenu("&Debug");
+	QAction *show_traffic = debug->addAction("Show &Traffic");
+	show_traffic->setCheckable(true);
+	connect(show_traffic, &QAction::toggled, this,
+	    &MainWindow::showTraffic);
+
 	// Selecting copies, as the pasteboard's "primary selection".
 	connect(screen, &Screen::selectionMade, this, &MainWindow::copy);
 
@@ -138,6 +156,14 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	statusBar()->addPermanentWidget(state, 1);
 
 	connect(&link, &Link::received, &terminal, &Terminal::feed);
+	// Kept whether or not the pane is showing, so opening it after
+	// something odd shows what led up to it.
+	connect(&link, &Link::received, this, [this](const QByteArray &b) {
+		traffic->log().add(TrafficLog::FromBoard, b);
+	});
+	connect(&link, &Link::sent, this, [this](const QByteArray &b) {
+		traffic->log().add(TrafficLog::ToBoard, b);
+	});
 	connect(&link, &Link::connected, this, &MainWindow::linkConnected);
 	connect(&link, &Link::lost, this, &MainWindow::linkLost);
 	connect(&link, &Link::stateChanged, this, &MainWindow::showState);
@@ -371,7 +397,40 @@ MainWindow::tick()
 	terminal.frame();
 	syncScrollBar();
 	screen->update();
+	if (traffic->isVisible())
+		traffic->refresh();
 	showState();
+}
+
+/* Show or hide the traffic pane. The window widens or narrows by the pane's
+ * width, so the screen keeps its size and its text stays as it was. */
+void
+MainWindow::showTraffic(bool on)
+{
+	if (on == traffic->isVisible())
+		return;
+	QSplitter *split = static_cast<QSplitter *>(centralWidget());
+	const bool grow = !isMaximized() && !isFullScreen();
+	// The pane and the splitter's handle beside it.
+	const int extra = split->handleWidth() +
+	    (on ? traffic->lineWidth() : traffic->width());
+	const int keep = tabs->width();
+
+	traffic->setVisible(on);
+	if (on) {
+		traffic->refresh();
+		if (grow)
+			resize(width() + extra, height());
+		// The pane gets a whole line. If the window could not grow
+		// that far (the display is too narrow), the screen gives up
+		// the difference and scales down, rather than the pane
+		// cutting its lines off.
+		const int pane = extra - split->handleWidth();
+		split->setSizes({ qMax(0, qMin(keep,
+		    split->width() - split->handleWidth() - pane)), pane });
+	} else if (grow) {
+		resize(width() - extra, height());
+	}
 }
 
 void

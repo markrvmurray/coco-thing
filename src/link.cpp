@@ -76,8 +76,9 @@ Link::close()
 void
 Link::write(const QByteArray &bytes)
 {
-	if (st != Open)
+	if (st != Open || bytes.isEmpty())
 		return;
+	emit sent(bytes);
 	if (!loopback) {
 		port.write(bytes);
 		return;

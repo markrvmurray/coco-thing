@@ -59,6 +59,8 @@ add_library(termcore STATIC
     src/mackeys.h
     src/screentext.cpp
     src/screentext.h
+    src/traffic.cpp
+    src/traffic.h
 )
 target_include_directories(termcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(termcore PUBLIC pvcore Qt6::Gui Qt6::SerialPort)
@@ -82,6 +84,8 @@ qt_add_executable(coco-thing
     src/screen.h
     src/prefsdialog.cpp
     src/prefsdialog.h
+    src/trafficpane.cpp
+    src/trafficpane.h
 )
 target_link_libraries(coco-thing PRIVATE termcore Qt6::Widgets)
 set_target_properties(coco-thing PROPERTIES
@@ -117,10 +121,17 @@ add_test(NAME keyboard COMMAND test_keyboard)
 set_tests_properties(keyboard PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
 add_executable(test_mainwindow tests/test_mainwindow.cpp src/mainwindow.cpp
-    src/screen.cpp src/prefsdialog.cpp)
+    src/screen.cpp src/prefsdialog.cpp src/trafficpane.cpp)
 target_link_libraries(test_mainwindow PRIVATE termcore Qt6::Widgets)
 add_test(NAME mainwindow COMMAND test_mainwindow)
 set_tests_properties(mainwindow PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+
+add_executable(test_traffic tests/test_traffic.cpp)
+target_link_libraries(test_traffic PRIVATE termcore)
+# The saved C header is compiled by the compilers that build this.
+target_compile_definitions(test_traffic PRIVATE
+    TEST_CC="${CMAKE_C_COMPILER}" TEST_CXX="${CMAKE_CXX_COMPILER}")
+add_test(NAME traffic COMMAND test_traffic)
 
 add_executable(test_screentext tests/test_screentext.cpp)
 target_link_libraries(test_screentext PRIVATE termcore)

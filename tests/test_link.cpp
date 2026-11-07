@@ -120,6 +120,7 @@ private:
 
 struct Events {
 	QByteArray rx;
+	QByteArray tx;		/* what sent() reported */
 	int connects = 0;
 	int reconnects = 0;
 	int losses = 0;
@@ -136,6 +137,8 @@ watch(Link &link, Events &ev)
 			ev.reconnects++;
 	});
 	QObject::connect(&link, &Link::lost, [&ev] { ev.losses++; });
+	QObject::connect(&link, &Link::sent,
+	    [&ev](const QByteArray &b) { ev.tx += b; });
 }
 
 /* Bytes flow both ways over an open link. */
@@ -150,7 +153,9 @@ check_traffic(Link &link, Board &board, Events &ev, const char *tag)
 	 * board collects. */
 	const QByteArray keys = QByteArray("k") + tag;
 	QByteArray got;
+	ev.tx.clear();
 	link.write(keys);
+	CHECK(ev.tx == keys);		/* reported as it goes */
 	CHECK(wait_for([&] { got += board.take(0); return got == keys; }));
 }
 
@@ -311,6 +316,7 @@ test_loopback()
 
 	link.write("abc");
 	link.write(QByteArray("\x1B\x40\x00", 3));	/* binary passes too */
+	CHECK(ev.tx == QByteArray("abc\x1B\x40\x00", 6));
 	CHECK(ev.rx.isEmpty());				/* not inside write */
 	CHECK(wait_for([&] { return ev.rx.size() == 6; }));
 	CHECK(ev.rx == QByteArray("abc\x1B\x40\x00", 6));
@@ -323,7 +329,9 @@ test_loopback()
 	ev.rx.clear();
 	link.write("late");
 	link.close();
+	ev.tx.clear();
 	link.write("after");
+	CHECK(ev.tx.isEmpty());		/* not open: nothing sent or said */
 	idle(5 * POLL_MS);
 	CHECK(ev.rx.isEmpty());
 	CHECK(link.state() == Link::Closed);

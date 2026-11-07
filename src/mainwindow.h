@@ -19,6 +19,7 @@
 #include "prefs.h"
 #include "screen.h"
 #include "terminal.h"
+#include "trafficpane.h"
 
 class MainWindow : public QMainWindow {
 	Q_OBJECT
@@ -47,6 +48,7 @@ private slots:
 	void syncScrollBar();
 	void fitWindow();
 	void renderTab();
+	void showTraffic(bool on);
 
 private:
 	void showState();
@@ -55,6 +57,7 @@ private:
 	Screen *screen;
 	QScrollBar *scroll_bar;
 	QTabWidget *tabs;	/* one tab: the port, framing the screen */
+	TrafficPane *traffic;	/* the link's bytes, under the screen */
 	QLabel *tab_label;	/* its title, drawn in the screen's face */
 	QString tab_text;
 	QByteArray face;	/* the screen's face; empty = built-in */

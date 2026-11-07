@@ -21,6 +21,8 @@
 #include <QFileInfo>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QPlainTextEdit>
+#include <QTextBlock>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QSettings>
@@ -32,6 +34,7 @@
 #include "mainwindow.h"
 #include "prefs.h"
 #include "screen.h"
+#include "trafficpane.h"
 #include "video.h"
 
 static int failures;
@@ -250,7 +253,7 @@ main(int argc, char *argv[])
 		lines += QString("out %1\r\n").arg(i).toLatin1();
 	(void)write(board, lines.constData(), lines.size());
 	spin(300);
-	QScrollBar *bar = w->findChild<QScrollBar *>();
+	QScrollBar *bar = w->findChild<QScrollBar *>("screenScrollBar");
 	CHECK(bar != nullptr);
 	CHECK(screen->scrolledBack() == 0);
 	if (bar != nullptr) {
@@ -280,6 +283,79 @@ main(int argc, char *argv[])
 		fit->trigger();
 	spin(50);
 	CHECK(screen->size() == screen->fittedSize(screen->height()));
+
+	/* The traffic pane: hidden until asked for, then the link's bytes
+	 * both ways as `hexdump -C` shows them, from before it opened too,
+	 * each byte green from the board and red to it. Showing and hiding it
+	 * leaves the screen's size alone. */
+	TrafficPane *pane = w->findChild<TrafficPane *>();
+	QAction *show_traffic = action(w, "Show &Traffic");
+	CHECK(pane != nullptr && show_traffic != nullptr);
+	if (pane != nullptr && show_traffic != nullptr) {
+		CHECK(!pane->isVisible());
+		const QSize before = screen->size();
+		show_traffic->trigger();
+		spin(100);
+		CHECK(pane->isVisible());
+		CHECK(screen->size() == before);
+		CHECK(screen->hasFocus());
+		/* Beside the screen, wide enough for a whole line. */
+		CHECK(pane->x() > screen->mapTo(w, QPoint(0, 0)).x() +
+		    screen->width());
+		CHECK(pane->width() >= pane->lineWidth());
+
+		/* The first keys typed, and the board's greeting. */
+		CHECK(pane->text().startsWith("00000000  68 49 0d 13 81 9c "));
+		CHECK(pane->text().contains("|hI.....hello fro|"));
+
+		/* Each byte coloured by its direction: the keys red, the
+		 * board's reply green. */
+		QPlainTextEdit *view = pane->findChild<QPlainTextEdit *>();
+		CHECK(view != nullptr);
+		int to = 0, from = 0;
+		for (QTextBlock b = view != nullptr ? view->document()->begin()
+		    : QTextBlock(); b.isValid(); b = b.next()) {
+			for (QTextBlock::iterator it = b.begin(); !it.atEnd();
+			    ++it) {
+				const QTextFragment f = it.fragment();
+				const QColor c = f.charFormat().foreground()
+				    .color();
+				if (f.text() == "68" && to == 0) {	/* h */
+					CHECK(c.red() > c.green());
+					to++;
+				}
+				if (f.text().contains("hello") && from == 0) {
+					CHECK(c.green() > c.red());
+					from++;
+				}
+			}
+		}
+		CHECK(to == 1 && from == 1);
+
+		/* New traffic shows on the next frame. */
+		(void)write(board, "late news\r\n", 11);
+		spin(200);
+		CHECK(pane->text().contains("late news"));
+		CHECK(pane->text().trimmed() == pane->log().text().trimmed());
+
+		/* Saved as Python, or as a C header for a .h name. */
+		QString error;
+		const QString py = settings_dir.filePath("traffic.py");
+		CHECK(pane->saveTo(py, &error));
+		QFile f(py);
+		CHECK(f.open(QIODevice::ReadOnly));
+		CHECK(QString::fromUtf8(f.readAll()) == pane->log().python());
+		const QString h = settings_dir.filePath("traffic.h");
+		CHECK(pane->saveTo(h, &error));
+		QFile g(h);
+		CHECK(g.open(QIODevice::ReadOnly));
+		CHECK(QString::fromUtf8(g.readAll()) == pane->log().cHeader());
+
+		show_traffic->trigger();
+		spin(100);
+		CHECK(!pane->isVisible());
+		CHECK(screen->size() == before);
+	}
 
 	/* The frame's tab names the port, and says when it is closed. */
 	QTabWidget *tabs = w->findChild<QTabWidget *>();
