@@ -88,9 +88,31 @@ qt_add_executable(coco-thing
     src/trafficpane.h
 )
 target_link_libraries(coco-thing PRIVATE termcore Qt6::Widgets)
+# The icon: the Pico-Thing's "?!" logo, drawn by tools/makeicon.cpp. The
+# .icns is kept in the tree, so a build does not need its font; run
+# `cmake --build build --target icon` to draw it again.
+set(ICON ${CMAKE_SOURCE_DIR}/resources/coco-thing.icns)
+target_sources(coco-thing PRIVATE ${ICON})
+set_source_files_properties(${ICON} PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources)
 set_target_properties(coco-thing PROPERTIES
     MACOSX_BUNDLE ON
+    MACOSX_BUNDLE_ICON_FILE coco-thing.icns
 )
+
+add_executable(makeicon EXCLUDE_FROM_ALL tools/makeicon.cpp)
+target_link_libraries(makeicon PRIVATE Qt6::Gui)
+set(ICON_FONT "/System/Library/Fonts/Supplemental/Comic Sans MS Bold.ttf"
+    CACHE FILEPATH "The font the icon's ?! is drawn in")
+add_custom_target(icon
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${CMAKE_BINARY_DIR}/coco-thing.iconset
+    COMMAND ${CMAKE_COMMAND} -E env QT_QPA_PLATFORM=offscreen
+        $<TARGET_FILE:makeicon> ${ICON_FONT}
+        ${CMAKE_BINARY_DIR}/coco-thing.iconset
+    COMMAND iconutil -c icns -o ${ICON} ${CMAKE_BINARY_DIR}/coco-thing.iconset
+    DEPENDS makeicon
+    COMMENT "Drawing the icon into resources/coco-thing.icns"
+    VERBATIM)
 
 enable_testing()
 add_executable(test_terminal tests/test_terminal.cpp)
