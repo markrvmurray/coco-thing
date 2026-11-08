@@ -4,8 +4,8 @@
  * Mac key events through the whole path -- Keyboard, the firmware's HID
  * cooker, its input FIFO, and Terminal::takeInput() reading it as the 6809
  * does -- against the bytes the cooker documents (hid_cook.cpp: the UK
- * layout, vtio's arrow columns, F1-F12 as $80-$8B, the keypad under Num
- * Lock, and its own repeat).
+ * layout, the arrows and editing keys at $8C-$9E, F1-F12 as $80-$8B, Alt
+ * setting bit 7, the keypad under Num Lock, and its own repeat).
  */
 
 #include <cstdio>
@@ -109,15 +109,16 @@ test_controls()
 	CHECK(type(kVK_Space) == " ");
 }
 
-/* vtio's KeyTbl: plain, Shift, Ctrl, and Shift winning over Ctrl. */
+/* The arrows: plain, Shift, Ctrl, and Shift winning over Ctrl, all with
+ * bit 7 set so none is mistaken for a control character. */
 static void
 test_arrows()
 {
 	const struct { unsigned code; int plain, shift, ctrl; } arrows[] = {
-		{ kVK_UpArrow,    0x0C, 0x1C, 0x13 },
-		{ kVK_DownArrow,  0x0A, 0x1A, 0x12 },
-		{ kVK_LeftArrow,  0x08, 0x18, 0x10 },
-		{ kVK_RightArrow, 0x09, 0x19, 0x11 },
+		{ kVK_UpArrow,    0x8C, 0x90, 0x94 },
+		{ kVK_DownArrow,  0x8D, 0x91, 0x95 },
+		{ kVK_LeftArrow,  0x8E, 0x92, 0x96 },
+		{ kVK_RightArrow, 0x8F, 0x93, 0x97 },
 	};
 
 	fresh();
@@ -128,6 +129,39 @@ test_arrows()
 		CHECK(type(a.code, Qt::ShiftModifier | Qt::ControlModifier) ==
 		    bytes({ a.shift }));
 	}
+}
+
+/* The editing keys; the Mac's Help key is in Insert's place. */
+static void
+test_editing_keys()
+{
+	fresh();
+	CHECK(type(kVK_Home) == bytes({ 0x98 }));
+	CHECK(type(kVK_End) == bytes({ 0x99 }));
+	CHECK(type(kVK_PageUp) == bytes({ 0x9A }));
+	CHECK(type(kVK_PageDown) == bytes({ 0x9B }));
+	CHECK(type(kVK_Help) == bytes({ 0x9D }));
+	CHECK(type(kVK_ForwardDelete) == bytes({ 0x9E }));
+}
+
+/* Option is Alt: it sets bit 7 on a printable character, as the CoCo3's
+ * ALT key does, and leaves everything else alone. */
+static void
+test_option()
+{
+	fresh();
+	CHECK(type(kVK_ANSI_A, Qt::AltModifier) == bytes({ 0xE1 }));
+	CHECK(type(kVK_ANSI_A, Qt::AltModifier | Qt::ShiftModifier) ==
+	    bytes({ 0xC1 }));
+	CHECK(type(kVK_ANSI_1, Qt::AltModifier) == bytes({ 0xB1 }));
+	CHECK(type(kVK_Space, Qt::AltModifier) == bytes({ 0xA0 }));
+	CHECK(type(kVK_ANSI_C, Qt::AltModifier | Qt::ControlModifier) ==
+	    bytes({ 0x03 }));
+	CHECK(type(kVK_Return, Qt::AltModifier) == bytes({ 0x0D }));
+	CHECK(type(kVK_UpArrow, Qt::AltModifier) == bytes({ 0x8C }));
+	CHECK(type(kVK_F1, Qt::AltModifier) == bytes({ 0x80 }));
+	CHECK(type(kVK_ANSI_3, Qt::AltModifier | Qt::ShiftModifier) ==
+	    bytes({ 0x9C }));	/* £ is already high */
 }
 
 static void
@@ -171,8 +205,10 @@ test_keypad()
 	CHECK(type(kVK_ANSI_Keypad8) == "8");
 	CHECK(type(kVK_ANSI_Keypad8, Qt::KeypadModifier) == "8");
 	CHECK(type(kVK_ANSI_KeypadClear).isEmpty());
-	CHECK(type(kVK_ANSI_Keypad8) == bytes({ 0x0C }));
-	CHECK(type(kVK_ANSI_Keypad4) == bytes({ 0x08 }));
+	CHECK(type(kVK_ANSI_Keypad8) == bytes({ 0x8C }));
+	CHECK(type(kVK_ANSI_Keypad4) == bytes({ 0x8E }));
+	CHECK(type(kVK_ANSI_Keypad7) == bytes({ 0x98 }));	/* Home */
+	CHECK(type(kVK_ANSI_KeypadDecimal) == bytes({ 0x9E }));	/* Del */
 	CHECK(type(kVK_ANSI_KeypadClear).isEmpty());
 	CHECK(type(kVK_ANSI_Keypad8) == "8");
 }
@@ -269,6 +305,8 @@ main(int argc, char *argv[])
 	test_letters_and_caps();
 	test_controls();
 	test_arrows();
+	test_editing_keys();
+	test_option();
 	test_function_keys();
 	test_uk_layout();
 	test_keypad();

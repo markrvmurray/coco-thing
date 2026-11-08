@@ -202,7 +202,7 @@ main(int argc, char *argv[])
 	char buf[64];
 	const ssize_t n = read(board, buf, sizeof(buf));
 	CHECK(QByteArray(buf, n > 0 ? (int)n : 0) ==
-	    QByteArray("hI\r\x13\x81\x9C", 6));
+	    QByteArray("hI\r\x94\x81\x9C", 6));
 
 	/* Select All copies what the board drew to the pasteboard. */
 	const char hello[] = "\x0C" "hello from the board\r\n";
@@ -305,7 +305,7 @@ main(int argc, char *argv[])
 		CHECK(pane->width() >= pane->lineWidth());
 
 		/* The first keys typed, and the board's greeting. */
-		CHECK(pane->text().startsWith("00000000  68 49 0d 13 81 9c "));
+		CHECK(pane->text().startsWith("00000000  68 49 0d 94 81 9c "));
 		CHECK(pane->text().contains("|hI.....hello fro|"));
 
 		/* Each byte coloured by its direction: the keys red, the
