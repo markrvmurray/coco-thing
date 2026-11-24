@@ -6,6 +6,7 @@
 
 #include "link.h"
 
+#include <QDir>
 #include <QFile>
 
 static const int POLL_MS = 500;
@@ -19,6 +20,40 @@ Link::Link(QObject *parent)
 	connect(&poll, &QTimer::timeout, this, &Link::check);
 	connect(&port, &QSerialPort::readyRead, this, &Link::readPort);
 	connect(&port, &QSerialPort::errorOccurred, this, &Link::portError);
+}
+
+QStringList
+Link::choices(const QStringList &available, const QString &last,
+    int *preferred)
+{
+	// The loopback plug first: always there, needing no board.
+	QStringList names = { LOOPBACK };
+	int usbmodem = -1;
+
+	for (const QString &name : available) {
+		if (name.startsWith("tty."))
+			continue;
+		if (usbmodem < 0 && name.contains("usbmodem"))
+			usbmodem = (int)names.size();
+		names << name;
+	}
+	if (!last.isEmpty() && !names.contains(last))
+		names << last;
+	if (!last.isEmpty())
+		*preferred = (int)names.indexOf(last);
+	else
+		*preferred = usbmodem >= 0 ? usbmodem : 0;
+	return names;
+}
+
+QString
+Link::typedName(const QString &typed)
+{
+	const QString name = typed.trimmed();
+
+	if (name == "~" || name.startsWith("~/"))
+		return QDir::homePath() + name.mid(1);
+	return name;
 }
 
 QString
@@ -116,8 +151,12 @@ Link::tryOpen()
 		error = port.errorString();
 		return;
 	}
-	// Some CDC firmware holds its output until the host asserts DTR.
-	port.setDataTerminalReady(true);
+	// Some CDC firmware holds its output until the host asserts DTR. A
+	// pty (USim's console) has no modem lines, and refuses with an
+	// unsupported-operation error that is no fault of the link's: let it
+	// go, so the port is not left reporting it.
+	if (!port.setDataTerminalReady(true))
+		port.clearError();
 	error.clear();
 
 	const bool again = was_open;

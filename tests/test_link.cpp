@@ -6,6 +6,11 @@
  * for its device node: removing the link and closing the pty is the board
  * resetting, and pointing the link at a fresh pty is it enumerating again
  * under the same name.
+ *
+ * The same pty and symlink are exactly how USim's `usim09pt --console-pty`
+ * publishes the emulator's console, so those tests cover it too, and a few
+ * more follow its ways: a raw 8-bit line, and a new run replacing the link
+ * by renaming over it rather than leaving a gap.
  */
 
 #include <cstdio>
@@ -13,9 +18,12 @@
 #include <fcntl.h>
 #include <functional>
 #include <poll.h>
+#include <stdio.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QTemporaryDir>
 #include <QThread>
@@ -64,18 +72,28 @@ public:
 
 	void plug()
 	{
-		master = posix_openpt(O_RDWR | O_NOCTTY);
-		if (master < 0 || grantpt(master) != 0 || unlockpt(master) != 0) {
-			perror("pty");
-			exit(2);
-		}
-		/* Non-blocking, so a test of broken code fails rather than
-		 * hangs: writing to a master whose slave is not open blocks. */
-		fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK);
+		master = open_pty();
 		if (symlink(ptsname(master), node.toLocal8Bit().constData()) != 0) {
 			perror("symlink");
 			exit(2);
 		}
+	}
+
+	/* USim's next run: a new pty, published by renaming a fresh link over
+	 * the old one, so the node never goes missing; and the old pty gone,
+	 * as the last run has exited (or was killed, leaving its link). */
+	void rerun()
+	{
+		const int next = open_pty();
+		const QByteArray tmp = (node + ".new").toLocal8Bit();
+
+		if (symlink(ptsname(next), tmp.constData()) != 0 ||
+		    rename(tmp.constData(), node.toLocal8Bit().constData()) != 0) {
+			perror("rerun");
+			exit(2);
+		}
+		hangup();
+		master = next;
 	}
 
 	void unplug()
@@ -95,6 +113,10 @@ public:
 	}
 
 	void send(const char *s) { (void)::write(master, s, strlen(s)); }
+	void send(const QByteArray &b)
+	{
+		(void)::write(master, b.constData(), (size_t)b.size());
+	}
 
 	/* What the host has written, waiting up to `ms` for it. */
 	QByteArray take(int ms)
@@ -114,6 +136,26 @@ public:
 	}
 
 private:
+	static int open_pty()
+	{
+		const int fd = posix_openpt(O_RDWR | O_NOCTTY);
+		if (fd < 0 || grantpt(fd) != 0 || unlockpt(fd) != 0) {
+			perror("pty");
+			exit(2);
+		}
+		/* Non-blocking, so a test of broken code fails rather than
+		 * hangs: writing to a master whose slave is not open blocks. */
+		fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+		/* Raw 8-bit, as USim's PtySerial sets its pty: no echo, no
+		 * CR/LF translation, no flow control or signal characters. */
+		struct termios t;
+		if (tcgetattr(fd, &t) == 0) {
+			cfmakeraw(&t);
+			(void)tcsetattr(fd, TCSANOW, &t);
+		}
+		return fd;
+	}
+
 	QString node;
 	int master = -1;
 };
@@ -346,6 +388,138 @@ test_loopback()
 	link.close();
 }
 
+/* Every byte value crosses unchanged both ways: the guest's stream is
+ * binary ($1B graphics, GPLoad payloads), and CR, LF, XON, XOFF, the
+ * interrupt characters and bit-7 keys are all data. Opening the port also
+ * asserts DTR, which a pty cannot; that must not count as an error. */
+static void
+test_binary_both_ways(const QString &node)
+{
+	Board board(node);
+	Link link;
+	Events ev;
+	QByteArray all;
+
+	for (int i = 0; i < 256; i++)
+		all += (char)i;
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	board.plug();
+	link.open(node);
+	CHECK(link.state() == Link::Open);
+	CHECK(link.lastError().isEmpty());
+
+	board.send(all);
+	CHECK(wait_for([&] { return ev.rx.size() >= all.size(); }));
+	CHECK(ev.rx == all);
+
+	QByteArray got;
+	link.write(all);
+	CHECK(wait_for([&] {
+		got += board.take(0);
+		return got.size() >= all.size();
+	}));
+	CHECK(got == all);
+
+	idle(5 * POLL_MS);
+	CHECK(link.state() == Link::Open);
+	CHECK(ev.losses == 0);
+	link.close();
+}
+
+/* The emulator quits, and a later run publishes a different pty at the same
+ * path: the link waits through the gap and reopens the new one. */
+static void
+test_emulator_runs_again(const QString &node)
+{
+	Board board(node);
+	Link link;
+	Events ev;
+
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	board.plug();
+	link.open(node);
+	check_traffic(link, board, ev, "first run");
+
+	board.unplug();				/* `quit`: link and pty go */
+	CHECK(wait_for([&] { return link.state() == Link::Waiting; }));
+	board.rerun();
+	CHECK(wait_for([&] { return link.state() == Link::Open; }));
+	CHECK(ev.losses == 1 && ev.reconnects == 1);
+	check_traffic(link, board, ev, "second run");
+	link.close();
+}
+
+/* A new run renames its link over the old one with no gap, while the old
+ * pty is gone: the path never stops existing, so only the old port's error
+ * shows the loss, and the link must then open the new pty, not cling to
+ * the old. */
+static void
+test_emulator_replaces_link(const QString &node)
+{
+	Board board(node);
+	Link link;
+	Events ev;
+
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	board.plug();
+	link.open(node);
+	check_traffic(link, board, ev, "old run");
+
+	board.rerun();
+	CHECK(wait_for([&] { return ev.reconnects == 1; }));
+	CHECK(ev.losses == 1);
+	CHECK(link.state() == Link::Open);
+	check_traffic(link, board, ev, "new run");
+	link.close();
+}
+
+/* What Connect offers: the loopback plug first, the call-out devices but
+ * not their tty.* twins, and the last port even when it is not listed (a
+ * typed pty path, or a board not plugged in), which is then offered first;
+ * with no last port, the board's usbmodem is. */
+static void
+test_choices()
+{
+	const QStringList ports = { "tty.usbmodem1101", "cu.usbmodem1101",
+	    "tty.Bluetooth", "cu.Bluetooth", "cu.usbserial-A1" };
+	int pick = -1;
+
+	CHECK(Link::choices(ports, "", &pick) == QStringList({ Link::LOOPBACK,
+	    "cu.usbmodem1101", "cu.Bluetooth", "cu.usbserial-A1" }));
+	CHECK(pick == 1);
+
+	CHECK(Link::choices({ "cu.Bluetooth" }, "", &pick) ==
+	    QStringList({ Link::LOOPBACK, "cu.Bluetooth" }));
+	CHECK(pick == 0);
+
+	CHECK(Link::choices(ports, "cu.usbserial-A1", &pick).size() == 4);
+	CHECK(pick == 3);
+
+	const QStringList with_pty = Link::choices(ports, "/tmp/usim-console",
+	    &pick);
+	CHECK(with_pty.size() == 5 && with_pty.last() == "/tmp/usim-console");
+	CHECK(pick == 4);
+
+	CHECK(Link::choices({}, Link::LOOPBACK, &pick) ==
+	    QStringList({ Link::LOOPBACK }));
+	CHECK(pick == 0);
+}
+
+static void
+test_typed_name()
+{
+	CHECK(Link::typedName("  /tmp/usim-console \n") == "/tmp/usim-console");
+	CHECK(Link::typedName("cu.usbmodem1101") == "cu.usbmodem1101");
+	CHECK(Link::typedName("~/usim-console") ==
+	    QDir::homePath() + "/usim-console");
+	CHECK(Link::typedName("~") == QDir::homePath());
+	CHECK(Link::typedName("~other/x") == "~other/x");
+	CHECK(Link::typedName("   ").isEmpty());
+}
+
 /* A user's Disconnect is final: the board coming back does not reopen it. */
 static void
 test_close_stops_reconnecting(const QString &node)
@@ -389,6 +563,11 @@ main(int argc, char *argv[])
 	test_close_stops_reconnecting(node);
 	test_no_auto_reconnect(node);
 	test_loopback();
+	test_binary_both_ways(node);
+	test_emulator_runs_again(node);
+	test_emulator_replaces_link(node);
+	test_choices();
+	test_typed_name();
 
 	if (failures == 0)
 		printf("test_link: all passed\n");

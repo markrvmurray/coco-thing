@@ -10,6 +10,12 @@
  * after a loss, and also when the port is not there to begin with, so the
  * terminal can be started before the board.
  *
+ * A port is named as QSerialPort names it (cu.usbmodem1101, found in /dev), or
+ * by an absolute path, which may be a symlink. USim's `usim09pt
+ * --console-pty=PATH` publishes the emulator's console that way: PATH links
+ * to a pty that changes with every run, and is removed when the run ends, so
+ * the emulator quitting and starting again looks just like a board reset.
+ *
  * The port named LOOPBACK is not a device but a loopback plug: everything
  * written comes back as received, with the handshake lines tied, so nothing
  * ever holds it up. It opens at once, and is never lost or waited for.
@@ -25,6 +31,7 @@
 #include <QObject>
 #include <QSerialPort>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 
 class Link : public QObject {
@@ -41,6 +48,20 @@ public:
 	static const QString LOOPBACK;
 
 	explicit Link(QObject *parent = nullptr);
+
+	/* The ports to offer for Connect, in order: LOOPBACK, then
+	 * `available` (QSerialPort's names; the macOS tty.* dial-in twins are
+	 * left out, as the cu.* call-out device is the one to open), then
+	 * `last` if it is not among them -- a typed path, or a board that is
+	 * not plugged in yet. `*preferred` is the one to offer first: `last`,
+	 * or else the first usbmodem (the Pico-Thing's CDC port), or else
+	 * LOOPBACK. */
+	static QStringList choices(const QStringList &available,
+	    const QString &last, int *preferred);
+
+	/* A port name as typed: surrounding spaces dropped, and a leading ~/
+	 * taken as the home directory. */
+	static QString typedName(const QString &typed);
 
 	/* Connect to `name` (e.g. cu.usbmodem1101, or an absolute path) and
 	 * keep it connected until close(). */

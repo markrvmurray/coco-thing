@@ -305,27 +305,21 @@ MainWindow::fitWindow()
 void
 MainWindow::choosePort()
 {
-	// The loopback plug first: always there, needing no board.
-	QStringList names = { Link::LOOPBACK };
+	QStringList available;
 	int preferred = 0;
 
-	for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts()) {
-		// The call-out device is the one to open on macOS.
-		if (info.portName().startsWith("tty."))
-			continue;
-		if (info.portName().contains("usbmodem"))
-			preferred = names.size();
-		names << info.portName();
-	}
-	if (names.isEmpty()) {
-		statusBar()->showMessage("No serial ports found");
-		return;
-	}
+	for (const QSerialPortInfo &info : QSerialPortInfo::availablePorts())
+		available << info.portName();
+	const QStringList names = Link::choices(available,
+	    QSettings().value("connection/last_port").toString(), &preferred);
 
+	// Editable, because a pty -- USim's console, for one -- is never
+	// listed: its path, or a symlink to it, can be typed instead.
 	bool ok = false;
-	const QString name = QInputDialog::getItem(this, "Connect",
-	    "Serial port:", names, preferred, false, &ok);
-	if (!ok)
+	const QString name = Link::typedName(QInputDialog::getItem(this,
+	    "Connect", "Serial port, or the path of a device or pty:", names,
+	    preferred, true, &ok));
+	if (!ok || name.isEmpty())
 		return;
 	link.open(name);
 	if (link.state() == Link::Closed)
