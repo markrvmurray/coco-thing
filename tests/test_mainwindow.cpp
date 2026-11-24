@@ -13,14 +13,17 @@
 #include <unistd.h>
 
 #include <Carbon/Carbon.h>
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QKeyEvent>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QTextBlock>
 #include <QMouseEvent>
@@ -29,6 +32,8 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTemporaryDir>
+
+#include <memory>
 
 #include "fontface.h"
 #include "mainwindow.h"
@@ -137,6 +142,46 @@ test_prefs_keep_only_changes()
 	QSettings().clear();
 }
 
+/* Connect's list is editable, starts on the preferred port, and shows the
+ * chosen line white on blue -- in the box, its line and its drop-down --
+ * whether or not the dialog has the focus; and what it returns is what
+ * the box holds, typed or chosen. */
+static void
+test_connect_dialog()
+{
+	const QStringList names = { "Loopback", "cu.usbmodem1101",
+	    "/tmp/usim-console" };
+	std::unique_ptr<QInputDialog> d(MainWindow::connectDialog(nullptr,
+	    names, 2));
+
+	CHECK(d->comboBoxItems() == names);
+	CHECK(d->isComboBoxEditable());
+	CHECK(d->textValue() == "/tmp/usim-console");
+
+	QComboBox *box = d->findChild<QComboBox *>();
+	CHECK(box != nullptr);
+	if (box == nullptr)
+		return;
+	CHECK(box->isEditable() && box->lineEdit() != nullptr);
+	const QList<QWidget *> parts = { box, box->lineEdit(), box->view() };
+	for (QWidget *w : parts) {
+		for (QPalette::ColorGroup g :
+		    { QPalette::Active, QPalette::Inactive }) {
+			const QPalette p = w->palette();
+			CHECK(p.color(g, QPalette::HighlightedText) ==
+			    QColor(Qt::white));
+			const QColor back = p.color(g, QPalette::Highlight);
+			CHECK(back.lightness() < 128 && back.blue() > back.red()
+			    && back.blue() > back.green());
+		}
+	}
+
+	box->setCurrentIndex(1);
+	CHECK(d->textValue() == "cu.usbmodem1101");
+	box->lineEdit()->setText("~/usim-console");
+	CHECK(d->textValue() == "~/usim-console");
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -154,6 +199,7 @@ main(int argc, char *argv[])
 	QApplication::setApplicationName("test_mainwindow");
 
 	test_prefs_keep_only_changes();
+	test_connect_dialog();
 
 	/* A face of solid cells, as the font in Preferences, so the tab's
 	 * title can be told apart from one in the built-in face. */

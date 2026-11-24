@@ -9,9 +9,11 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QFileInfo>
 #include <QHBoxLayout>
-#include <QInputDialog>
+#include <QLineEdit>
+#include <QListView>
 #include <QMenuBar>
 #include <QSerialPortInfo>
 #include <QSettings>
@@ -19,6 +21,8 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QtMath>
+
+#include <memory>
 
 #include "fontface.h"
 #include "fw_platform.h"
@@ -29,6 +33,11 @@
  * spend interpreting before the paint. */
 static const int FRAME_MS = 16;
 static const int PUMP_BUDGET_MS = 10;
+
+/* Connect's chosen port is shown white on this deep blue: the style's own
+ * colours put black text on pale blue, which was hard to read. */
+static const QColor SELECTED_BACK(0x1E, 0x5A, 0xC8);
+static const QColor SELECTED_TEXT(Qt::white);
 
 /* Pasted bytes sent each frame: about 1000 a second. USB CDC would deliver a
  * paste all at once, but the board's ACIA driver (sc6850) has a receive
@@ -314,18 +323,55 @@ MainWindow::choosePort()
 	const QStringList names = Link::choices(available,
 	    QSettings().value("connection/last_port").toString(), &preferred);
 
-	// Editable, because a pty -- USim's console, for one -- is never
-	// listed: its path, or a symlink to it, can be typed instead.
-	bool ok = false;
-	const QString name = Link::typedName(QInputDialog::getItem(this,
-	    "Connect", "Serial port, or the path of a device or pty:", names,
-	    preferred, true, &ok));
-	if (!ok || name.isEmpty())
+	std::unique_ptr<QInputDialog> dialog(connectDialog(this, names,
+	    preferred));
+	if (dialog->exec() != QDialog::Accepted)
+		return;
+	const QString name = Link::typedName(dialog->textValue());
+	if (name.isEmpty())
 		return;
 	link.open(name);
 	if (link.state() == Link::Closed)
 		statusBar()->showMessage(QString("Cannot open %1: %2")
 		    .arg(name, link.lastError()));
+}
+
+static void
+white_on_blue(QWidget *w)
+{
+	QPalette p = w->palette();
+
+	for (QPalette::ColorGroup g : { QPalette::Active, QPalette::Inactive }) {
+		p.setColor(g, QPalette::Highlight, SELECTED_BACK);
+		p.setColor(g, QPalette::HighlightedText, SELECTED_TEXT);
+	}
+	w->setPalette(p);
+}
+
+QInputDialog *
+MainWindow::connectDialog(QWidget *parent, const QStringList &names,
+    int preferred)
+{
+	auto *dialog = new QInputDialog(parent);
+
+	dialog->setWindowTitle("Connect");
+	dialog->setLabelText("Serial port, or the path of a device or pty:");
+	dialog->setComboBoxItems(names);
+	// Editable, because a pty -- USim's console, for one -- is never
+	// listed: its path, or a symlink to it, can be typed instead.
+	dialog->setComboBoxEditable(true);
+	if (preferred >= 0 && preferred < names.size())
+		dialog->setTextValue(names[preferred]);
+
+	// The line in the box, the list that drops down, and the box.
+	QComboBox *box = dialog->findChild<QComboBox *>();
+	if (box != nullptr) {
+		white_on_blue(box);
+		if (box->lineEdit() != nullptr)
+			white_on_blue(box->lineEdit());
+		white_on_blue(box->view());
+	}
+	return dialog;
 }
 
 void
