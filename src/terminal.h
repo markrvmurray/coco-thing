@@ -56,7 +56,10 @@ public:
 	int textRows() const { return area_rows; }
 
 	/* Draw text with `face` (the layout in fontface.h); empty for the
-	 * firmware's built-in face. What is on screen is redrawn with it. */
+	 * firmware's built-in face. It becomes the firmware's default face, so
+	 * a guest going back to the built-in face gets this one, and a face
+	 * the guest has selected is left in place. What is on screen is
+	 * redrawn. */
 	void setFace(const QByteArray &face);
 
 	/* Everything waiting in the firmware's input FIFO -- the keyboard's
@@ -85,7 +88,6 @@ public:
 
 private:
 	bool fill_fifo();
-	void applyFace();
 	QByteArray windowSetup() const;
 	void scrolling(int col, int row, int cols, int rows);
 	static void scrollHook(int col, int row, int cols, int rows);

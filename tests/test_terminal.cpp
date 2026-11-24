@@ -174,6 +174,64 @@ test_face(Terminal &t)
 	CHECK(!cell_blank(0, 0, bg));
 }
 
+/* The user's face is the firmware's default face, so each way a guest goes
+ * back to "the built-in face" lands on it, not on Spleen: selecting font
+ * buffer 0, and killing the buffer its font came from. A font the guest
+ * selected is its own: it is drawn, and choosing a face here leaves it. */
+static void
+test_face_survives_guest_reverts(Terminal &t)
+{
+	QByteArray solid_x(4096, 0);
+	for (int r = 0; r < 16; r++)
+		solid_x['X' * 16 + r] = (char)0xFF;
+	/* X at column `col` of the top row. */
+	auto put_x = [&](int col) {
+		t.feed(QByteArray("\x02", 1) + char(0x20 + col) + ' ' + 'X');
+		settle(t);
+	};
+	/* The guest's Font command, for buffer `id` of group 2. */
+	auto select = [&](int id) {
+		t.feed(QByteArray("\x1B\x3A\x02", 3) + char(id));
+	};
+
+	t.reset();
+	t.setFace(solid_x);
+	t.feed(QByteArray("\x05\x20\x0C", 3));
+	settle(t);
+	const uint8_t bg = video_framebuffer[FB_HEIGHT - 1][FB_WIDTH - 1];
+	put_x(0);
+	CHECK(cell_solid(0, 0, bg));
+
+	/* The guest defines buffer 2/1 and loads a blank face into it. The
+	 * terminal's backlog paces the 4 KB, as TDRE paces a real guest. */
+	t.feed(QByteArray("\x1B\x29\x02\x01\x10\x00", 6));
+	t.feed(QByteArray("\x1B\x2B\x02\x01\x01\x00\x08\x00\x10"
+	    "\x10\x00", 11));
+	t.feed(QByteArray(4096, 0));
+	select(1);
+	put_x(1);
+	CHECK(cell_blank(1, 0, bg));		/* the guest's face */
+
+	t.setFace(solid_x);			/* not over the guest's */
+	settle(t);
+	CHECK(cell_blank(1, 0, bg));
+
+	select(0);
+	put_x(2);
+	CHECK(cell_solid(2, 0, bg));		/* the user's, not Spleen */
+
+	select(1);
+	put_x(3);
+	CHECK(cell_blank(3, 0, bg));
+	t.feed(QByteArray("\x1B\x2A\x02\x01", 4));	/* KillBuf */
+	put_x(4);
+	CHECK(cell_solid(4, 0, bg));
+
+	t.setFace({});
+	settle(t);
+	CHECK(!cell_solid(4, 0, bg) && !cell_blank(4, 0, bg));	/* Spleen */
+}
+
 /* minted asks SS.ScSiz for the screen size, which over serial is the Term
  * descriptor's 80x25, then draws each screen row as exactly 80 characters,
  * space-padded, back to back with no CR or LF: it relies on the terminal
@@ -356,6 +414,7 @@ main()
 	test_text(t);
 	test_bar(t);
 	test_face(t);
+	test_face_survives_guest_reverts(t);
 	test_text_area_wraps_like_minted(t);
 	test_bell(t);
 	test_scrollback(t);

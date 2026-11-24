@@ -18,11 +18,6 @@
 // include directory.
 #include <registers.h>
 
-/* The renderer's face pointer (video_render.cpp). Defined with external
- * linkage there but declared in no header, since on the board only the
- * guest's Font command sets it. NULL selects the built-in face. */
-void vidterm_set_font(const uint8_t *data, uint32_t len);
-
 /* The window the terminal opens for a text area smaller than the panel.
  * Any id but 0 (the root, the panel itself) would do. */
 static const uint8_t AREA_WINDOW = 1;
@@ -44,6 +39,8 @@ Terminal::~Terminal()
 		fw_platform_set_scroll(nullptr);
 		the_terminal = nullptr;
 	}
+	// The renderer keeps a pointer to the face, which is about to go.
+	vidterm_set_default_font(nullptr, 0);
 }
 
 void
@@ -57,13 +54,8 @@ Terminal::reset()
 	vid_link_init();
 	pending.clear();
 	pending_pos = 0;
-
-	// The link hands its console reset to the render side, which carries
-	// it out on the next pass and selects the built-in face. Run that pass
-	// now (the FIFO is empty, so it does nothing else), then put the
-	// chosen face back.
-	vid_link_render();
-	applyFace();
+	// The chosen face is the renderer's default face, which a reset
+	// leaves alone: the console's reset selects it again.
 
 	// Open the text area ahead of anything from the board, through the
 	// same interpreter the board's own window commands use.
@@ -191,7 +183,15 @@ void
 Terminal::setFace(const QByteArray &f)
 {
 	face = f;
-	applyFace();
+	// The default face, not the selected one: whenever the firmware goes
+	// back to "the built-in face" -- a guest's Font with buffer 0, a
+	// killed font buffer, a console reset -- it comes back to this. A
+	// face the guest has selected stays selected.
+	if (face.isEmpty())
+		vidterm_set_default_font(nullptr, 0);
+	else
+		vidterm_set_default_font(reinterpret_cast<const uint8_t *>(
+		    face.constData()), (uint32_t)face.size());
 
 	// Rewrite every text row unchanged: that marks each cell dirty, so the
 	// next refresh draws the screen's text again in the new face.
@@ -201,16 +201,6 @@ Terminal::setFace(const QByteArray &f)
 		vidterm_write_row(0, r, TEXT_COLS, row);
 	}
 	vidterm_refresh();
-}
-
-void
-Terminal::applyFace()
-{
-	if (face.isEmpty())
-		vidterm_set_font(nullptr, 0);
-	else
-		vidterm_set_font(reinterpret_cast<const uint8_t *>(
-		    face.constData()), (uint32_t)face.size());
 }
 
 void
