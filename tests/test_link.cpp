@@ -520,6 +520,36 @@ test_typed_name()
 	CHECK(Link::typedName("   ").isEmpty());
 }
 
+/* A port another program has open (QSerialPort's lock is held -- another
+ * coco-thing, say) is waited for, with the reason given, and taken as soon
+ * as it is let go. */
+static void
+test_port_in_use(const QString &node)
+{
+	Board board(node);
+	Link first, second;
+	Events ev;
+
+	watch(second, ev);
+	first.setPollInterval(POLL_MS);
+	second.setPollInterval(POLL_MS);
+	board.plug();
+	first.open(node);
+	CHECK(first.state() == Link::Open);
+
+	second.open(node);
+	CHECK(second.state() == Link::Waiting);
+	CHECK(second.lastError().contains("lock"));
+	idle(5 * POLL_MS);
+	CHECK(second.state() == Link::Waiting && ev.connects == 0);
+
+	first.close();
+	CHECK(wait_for([&] { return second.state() == Link::Open; }));
+	CHECK(ev.connects == 1 && second.lastError().isEmpty());
+	check_traffic(second, board, ev, "freed");
+	second.close();
+}
+
 /* A user's Disconnect is final: the board coming back does not reopen it. */
 static void
 test_close_stops_reconnecting(const QString &node)
@@ -566,6 +596,7 @@ main(int argc, char *argv[])
 	test_binary_both_ways(node);
 	test_emulator_runs_again(node);
 	test_emulator_replaces_link(node);
+	test_port_in_use(node);
 	test_choices();
 	test_typed_name();
 

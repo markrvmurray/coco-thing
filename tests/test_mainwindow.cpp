@@ -402,6 +402,19 @@ main(int argc, char *argv[])
 	/* Destroyed with the screen holding the keyboard. */
 	delete w;
 
+	/* Waiting for a port, the status bar says why. */
+	{
+		const QString missing = settings_dir.filePath("no-such-port");
+		MainWindow waiting(missing);
+		waiting.show();
+		spin(100);
+		QLabel *st = waiting.findChild<QLabel *>("linkState");
+		CHECK(st != nullptr);
+		if (st != nullptr)
+			CHECK(st->text().startsWith(QString(
+			    "Waiting for %1: no such device").arg(missing)));
+	}
+
 	/* On the loopback port, keys come back to the screen: typed, cooked,
 	 * echoed and drawn by the firmware, with no board at all. */
 	w = new MainWindow(Link::LOOPBACK);

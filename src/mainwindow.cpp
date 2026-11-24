@@ -153,6 +153,7 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	connect(screen, &Screen::selectionMade, this, &MainWindow::copy);
 
 	state = new QLabel(this);
+	state->setObjectName("linkState");
 	statusBar()->addPermanentWidget(state, 1);
 
 	connect(&link, &Link::received, &terminal, &Terminal::feed);
@@ -481,7 +482,11 @@ MainWindow::showState()
 		s = "Not connected";
 		break;
 	case Link::Waiting:
+		// Why: usually that it is not there yet, but it may be in use
+		// by another program, which holds its lock.
 		s = QString("Waiting for %1").arg(link.portName());
+		if (!link.lastError().isEmpty())
+			s += ": " + link.lastError();
 		break;
 	case Link::Open:
 		s = QString("Connected: %1").arg(link.portName());
