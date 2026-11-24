@@ -34,8 +34,9 @@
 static const int FRAME_MS = 16;
 static const int PUMP_BUDGET_MS = 10;
 
-/* Connect's chosen port is shown white on this deep blue: the style's own
- * colours put black text on pale blue, which was hard to read. */
+/* White on blue is how the tab's title and Connect's chosen port are shown:
+ * the style's own colours put black text on blue, which was hard to read.
+ * Connect's chosen line gets this deep blue; the tab is the style's. */
 static const QColor SELECTED_BACK(0x1E, 0x5A, 0xC8);
 static const QColor SELECTED_TEXT(Qt::white);
 
@@ -207,16 +208,27 @@ MainWindow::~MainWindow()
 	disconnect(screen, nullptr, this, nullptr);
 }
 
+/* The title's ink. macOS draws the selected tab blue while the window is
+ * active, where the style's text colour, black, was hard to read: white
+ * there, as macOS itself writes on a selected segment. In the background
+ * the tab is grey, and the style's own colour is the one to use. */
+QColor
+MainWindow::tabInk() const
+{
+	if (isActiveWindow())
+		return SELECTED_TEXT;
+	return tabs->tabBar()->palette().color(QPalette::WindowText);
+}
+
 /* The tab's title in the screen's face at its own size, 8x16 a character:
  * smaller than the screen, which scales it up. Each face pixel becomes
- * whole device pixels, so it stays sharp on a Retina display. Coloured as
- * the tab bar's text, on nothing. */
+ * whole device pixels, so it stays sharp on a Retina display. Drawn in
+ * tabInk(), on nothing. */
 void
 MainWindow::renderTab()
 {
-	const QColor fg = tabs->tabBar()->palette().color(QPalette::WindowText);
-	const QImage img = fontface_sample(face, tab_text, fg.rgba(),
-	    qRgba(0, 0, 0, 0));
+	const QImage img = fontface_sample(face, tab_text,
+	    tabInk().rgba(), qRgba(0, 0, 0, 0));
 	const int k = qMax(1, qCeil(devicePixelRatioF()));
 	QPixmap pm = QPixmap::fromImage(img.scaled(img.size() * k,
 	    Qt::IgnoreAspectRatio, Qt::FastTransformation));
@@ -238,6 +250,7 @@ MainWindow::changeEvent(QEvent *ev)
 {
 	QMainWindow::changeEvent(ev);
 	if (ev->type() == QEvent::PaletteChange ||
+	    ev->type() == QEvent::ActivationChange ||
 	    ev->type() == QEvent::DevicePixelRatioChange)
 		renderTab();
 }

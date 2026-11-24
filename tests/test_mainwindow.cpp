@@ -434,6 +434,51 @@ main(int argc, char *argv[])
 				    (qAlpha(got.pixel(x, y)) > 0);
 		CHECK(same);
 
+		/* White on the selected tab's blue while the window is
+		 * active; the style's text colour on its grey otherwise. */
+		const QColor want_ink = w->isActiveWindow() ? QColor(Qt::white)
+		    : tabs->tabBar()->palette().color(QPalette::WindowText);
+		const QImage ink = pm.toImage();
+		int inked = 0;
+		bool right_ink = true;
+		for (int y = 0; y < ink.height(); y++)
+			for (int x = 0; x < ink.width(); x++)
+				if (qAlpha(ink.pixel(x, y)) > 0) {
+					inked++;
+					right_ink = right_ink &&
+					    QColor(ink.pixel(x, y)).rgb() ==
+					    want_ink.rgb();
+				}
+		CHECK(inked > 0 && right_ink);
+		CHECK(w->isActiveWindow());
+
+		/* Another window in front: the title is redrawn in the
+		 * style's colour, then white again when this one is back. */
+		auto ink_of = [&]() {
+			const QImage im = title->pixmap().toImage();
+			for (int y = 0; y < im.height(); y++)
+				for (int x = 0; x < im.width(); x++)
+					if (qAlpha(im.pixel(x, y)) > 0)
+						return QColor(im.pixel(x, y)).rgb();
+			return QColor(Qt::transparent).rgb();
+		};
+		const QRgb style_ink = tabs->tabBar()->palette()
+		    .color(QPalette::WindowText).rgb();
+		CHECK(style_ink != QColor(Qt::white).rgb());
+		{
+			QWidget other;
+			other.show();
+			other.activateWindow();
+			spin(100);
+			CHECK(!w->isActiveWindow());
+			CHECK(ink_of() == style_ink);
+		}
+		w->activateWindow();
+		screen->setFocus();
+		spin(100);
+		CHECK(w->isActiveWindow());
+		CHECK(ink_of() == QColor(Qt::white).rgb());
+
 		CHECK(!tabs->tabBar()->hasFocus() && screen->hasFocus());
 		QAction *disconnect = action(w, "&Disconnect");
 		CHECK(disconnect != nullptr);

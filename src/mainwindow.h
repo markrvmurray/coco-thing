@@ -58,6 +58,7 @@ private slots:
 	void showTraffic(bool on);
 
 private:
+	QColor tabInk() const;
 	void showState();
 	void applyPrefs();
 
