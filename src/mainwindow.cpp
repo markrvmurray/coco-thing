@@ -22,10 +22,10 @@
 #include <QTabBar>
 #include <QtMath>
 
-#include <memory>
 
 #include "fontface.h"
 #include "fw_platform.h"
+#include "connectdialog.h"
 #include "prefsdialog.h"
 #include "screentext.h"
 
@@ -34,10 +34,9 @@
 static const int FRAME_MS = 16;
 static const int PUMP_BUDGET_MS = 10;
 
-/* White on blue is how the tab's title and Connect's chosen port are shown:
- * the style's own colours put black text on blue, which was hard to read.
- * Connect's chosen line gets this deep blue; the tab is the style's. */
-static const QColor SELECTED_BACK(0x1E, 0x5A, 0xC8);
+/* The selected tab's title, while the window is active: the style draws the
+ * tab blue, and its own black text on it was hard to read. (Connect's
+ * chosen port is white on blue too; see connectdialog.cpp.) */
 static const QColor SELECTED_TEXT(Qt::white);
 
 /* Pasted bytes sent each frame: about 1000 a second. USB CDC would deliver a
@@ -194,7 +193,7 @@ MainWindow::MainWindow(const QString &port_name, QWidget *parent)
 	if (name.isEmpty() && prefs.connect_at_start)
 		name = settings.value("connection/last_port").toString();
 	if (!name.isEmpty())
-		link.open(name);
+		link.open(name, LineSettings::load(settings, name));
 	showState();
 }
 
@@ -265,13 +264,25 @@ MainWindow::closeEvent(QCloseEvent *ev)
 void
 MainWindow::editPrefs()
 {
-	PrefsDialog dialog(prefs, this);
+	const QString port = link.portName();
+	PrefsDialog dialog(prefs, port, link.lineSettings(), this);
 
 	if (dialog.exec() != QDialog::Accepted)
 		return;
 	prefs = dialog.prefs();
 	prefs.save();
 	applyPrefs();
+
+	// The port's line settings: kept for it, and set at once.
+	if (port.isEmpty() || !ConnectDialog::noSettingsReason(port).isEmpty())
+		return;
+	const LineSettings line = dialog.lineSettings();
+	QSettings settings;
+	line.save(settings, port);
+	if (!link.setLineSettings(line))
+		statusBar()->showMessage(QString("%1 refused %2: %3")
+		    .arg(port, line.summary(), link.lastError()));
+	showState();
 }
 
 void
@@ -336,55 +347,23 @@ MainWindow::choosePort()
 	const QStringList names = Link::choices(available,
 	    QSettings().value("connection/last_port").toString(), &preferred);
 
-	std::unique_ptr<QInputDialog> dialog(connectDialog(this, names,
-	    preferred));
-	if (dialog->exec() != QDialog::Accepted)
+	ConnectDialog dialog(names, preferred, this);
+	if (dialog.exec() != QDialog::Accepted)
 		return;
-	const QString name = Link::typedName(dialog->textValue());
+	const QString name = dialog.port();
 	if (name.isEmpty())
 		return;
-	link.open(name);
+	// Kept for the port, so a reconnection, the next Connect and the next
+	// start-up all get them back.
+	const LineSettings line = dialog.lineSettings();
+	if (ConnectDialog::noSettingsReason(name).isEmpty()) {
+		QSettings settings;
+		line.save(settings, name);
+	}
+	link.open(name, line);
 	if (link.state() == Link::Closed)
 		statusBar()->showMessage(QString("Cannot open %1: %2")
 		    .arg(name, link.lastError()));
-}
-
-static void
-white_on_blue(QWidget *w)
-{
-	QPalette p = w->palette();
-
-	for (QPalette::ColorGroup g : { QPalette::Active, QPalette::Inactive }) {
-		p.setColor(g, QPalette::Highlight, SELECTED_BACK);
-		p.setColor(g, QPalette::HighlightedText, SELECTED_TEXT);
-	}
-	w->setPalette(p);
-}
-
-QInputDialog *
-MainWindow::connectDialog(QWidget *parent, const QStringList &names,
-    int preferred)
-{
-	auto *dialog = new QInputDialog(parent);
-
-	dialog->setWindowTitle("Connect");
-	dialog->setLabelText("Serial port, or the path of a device or pty:");
-	dialog->setComboBoxItems(names);
-	// Editable, because a pty -- USim's console, for one -- is never
-	// listed: its path, or a symlink to it, can be typed instead.
-	dialog->setComboBoxEditable(true);
-	if (preferred >= 0 && preferred < names.size())
-		dialog->setTextValue(names[preferred]);
-
-	// The line in the box, the list that drops down, and the box.
-	QComboBox *box = dialog->findChild<QComboBox *>();
-	if (box != nullptr) {
-		white_on_blue(box);
-		if (box->lineEdit() != nullptr)
-			white_on_blue(box->lineEdit());
-		white_on_blue(box->view());
-	}
-	return dialog;
 }
 
 void
@@ -549,6 +528,8 @@ MainWindow::showState()
 		break;
 	case Link::Open:
 		s = QString("Connected: %1").arg(link.portName());
+		if (ConnectDialog::noSettingsReason(link.portName()).isEmpty())
+			s += QString(" (%1)").arg(link.lineSettings().summary());
 		break;
 	}
 	if (terminal.backlog() > 0)

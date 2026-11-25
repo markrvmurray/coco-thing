@@ -8,8 +8,15 @@
 
 #include <QDir>
 #include <QFile>
+#include <QSerialPortInfo>
 
 static const int POLL_MS = 500;
+
+/* The Pico-Thing's USB device (pico-thing-main's src/usb_descriptors.c). Its
+ * CDC ports carry the ACIAs' bytes over USB, with no UART behind them to
+ * set. */
+static const quint16 PICO_THING_VID = 0xCAFE;
+static const quint16 PICO_THING_PID = 0x4001;
 
 const QString Link::LOOPBACK = QStringLiteral("Loopback");
 
@@ -56,6 +63,17 @@ Link::typedName(const QString &typed)
 	return name;
 }
 
+bool
+Link::ignoresLineSettings(const QString &name)
+{
+	if (name == LOOPBACK)
+		return true;
+	const QSerialPortInfo info(name);
+	return info.hasVendorIdentifier() && info.hasProductIdentifier() &&
+	    info.vendorIdentifier() == PICO_THING_VID &&
+	    info.productIdentifier() == PICO_THING_PID;
+}
+
 QString
 Link::path() const
 {
@@ -64,10 +82,11 @@ Link::path() const
 }
 
 void
-Link::open(const QString &name)
+Link::open(const QString &name, const LineSettings &settings)
 {
 	close();
 	wanted = name;
+	line = settings;
 	was_open = false;
 	if (name == LOOPBACK) {
 		// Nothing to find, lose or wait for: open now.
@@ -108,6 +127,22 @@ Link::close()
 	setState(Closed);
 }
 
+bool
+Link::setLineSettings(const LineSettings &settings)
+{
+	line = settings;
+	// The loopback plug has no line; a closed or waiting port takes them
+	// when it opens.
+	if (loopback || !port.isOpen())
+		return true;
+	if (!line.applyTo(port)) {
+		error = port.errorString();
+		port.clearError();
+		return false;
+	}
+	return true;
+}
+
 void
 Link::write(const QByteArray &bytes)
 {
@@ -145,8 +180,10 @@ Link::tryOpen()
 		return;
 	}
 
-	// A CDC ACM port ignores the line settings, so the defaults stand.
+	// Set on the closed port, the settings are applied as it opens, and
+	// an open that cannot apply them fails.
 	port.setPortName(path());
+	line.applyTo(port);
 	if (!port.open(QIODevice::ReadWrite)) {
 		error = port.errorString();
 		return;

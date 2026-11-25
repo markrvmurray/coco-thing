@@ -1,7 +1,8 @@
 /*
  * prefsdialog.h
  *
- * The Preferences dialog: font, display and connection options. The font
+ * The Preferences dialog: font, display and connection options, and the
+ * line settings of the port in use. The font
  * preview is drawn with the face itself, at the cell's real 8x16 size
  * doubled, so it shows what the screen will.
  */
@@ -10,6 +11,7 @@
 
 #include <QDialog>
 
+#include "linesettings.h"
 #include "prefs.h"
 
 class QCheckBox;
@@ -19,14 +21,19 @@ class QLabel;
 class QLineEdit;
 class QRadioButton;
 class QSpinBox;
+class LineSettingsBox;
 
 class PrefsDialog : public QDialog {
 	Q_OBJECT
 
 public:
-	PrefsDialog(const Prefs &p, QWidget *parent = nullptr);
+	/* `port` is the one in use, with its settings `line`; empty if none
+	 * is, which greys the line settings. */
+	PrefsDialog(const Prefs &p, const QString &port = {},
+	    const LineSettings &line = {}, QWidget *parent = nullptr);
 
 	Prefs prefs() const;
+	LineSettings lineSettings() const;
 
 public slots:
 	void accept() override;
@@ -39,7 +46,8 @@ private slots:
 private:
 	QWidget *fontTab(const Prefs &p);
 	QWidget *displayTab(const Prefs &p);
-	QWidget *connectionTab(const Prefs &p);
+	QWidget *connectionTab(const Prefs &p, const QString &port,
+	    const LineSettings &line);
 
 	QRadioButton *font_builtin;
 	QRadioButton *font_system;
@@ -60,4 +68,5 @@ private:
 	QCheckBox *auto_reconnect;
 	QCheckBox *clear_on_reconnect;
 	QCheckBox *connect_at_start;
+	LineSettingsBox *line_box;
 };

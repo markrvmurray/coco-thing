@@ -25,6 +25,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QThread>
 
@@ -110,6 +111,16 @@ public:
 		if (master >= 0)
 			::close(master);
 		master = -1;
+	}
+
+	/* The line as the host has set it. A pty's settings belong to the
+	 * terminal, which both ends share. */
+	struct termios line() const
+	{
+		struct termios t = {};
+		if (tcgetattr(master, &t) != 0)
+			perror("tcgetattr");
+		return t;
 	}
 
 	void send(const char *s) { (void)::write(master, s, strlen(s)); }
@@ -574,6 +585,182 @@ test_close_stops_reconnecting(const QString &node)
 	board.unplug();
 }
 
+static LineSettings
+settings(qint32 baud, QSerialPort::DataBits bits, QSerialPort::Parity parity,
+    QSerialPort::StopBits stop, LineSettings::Flow flow)
+{
+	LineSettings l;
+
+	l.baud = baud;
+	l.data_bits = bits;
+	l.parity = parity;
+	l.stop_bits = stop;
+	l.flow = flow;
+	return l;
+}
+
+/* Whether `t` is `l`, flag by flag, and never software flow control. */
+static void
+check_line(const struct termios &t, const LineSettings &l, const char *tag)
+{
+	const tcflag_t size = l.data_bits == QSerialPort::Data7 ? CS7 :
+	    l.data_bits == QSerialPort::Data6 ? CS6 :
+	    l.data_bits == QSerialPort::Data5 ? CS5 : CS8;
+	bool ok = true;
+
+	ok = ok && cfgetospeed(&t) == (speed_t)l.baud;
+	ok = ok && cfgetispeed(&t) == (speed_t)l.baud;
+	ok = ok && (t.c_cflag & CSIZE) == size;
+	ok = ok && ((t.c_cflag & PARENB) != 0) ==
+	    (l.parity != QSerialPort::NoParity);
+	if (l.parity == QSerialPort::OddParity)
+		ok = ok && (t.c_cflag & PARODD) != 0;
+	if (l.parity == QSerialPort::EvenParity)
+		ok = ok && (t.c_cflag & PARODD) == 0;
+	ok = ok && ((t.c_cflag & CSTOPB) != 0) ==
+	    (l.stop_bits == QSerialPort::TwoStop);
+	ok = ok && ((t.c_cflag & CRTSCTS) == CRTSCTS) ==
+	    (l.flow == LineSettings::FlowRtsCts);
+	ok = ok && (t.c_iflag & (IXON | IXOFF | IXANY)) == 0;
+	if (!ok) {
+		fprintf(stderr, "%s: line is speed %lu cflag %#lx iflag %#lx, "
+		    "wanted %s\n", tag, (unsigned long)cfgetospeed(&t),
+		    (unsigned long)t.c_cflag, (unsigned long)t.c_iflag,
+		    qPrintable(l.summary()));
+	}
+	CHECK(ok);
+}
+
+/* A port opens with its line settings, takes new ones while open, and gets
+ * them again when it is reopened after a reset. RTS/CTS sets the hardware
+ * handshake and none clears it; software flow control is never set. Bytes
+ * still cross both ways whatever the settings. */
+static void
+test_line_settings(const QString &node)
+{
+	Board board(node);
+	Link link;
+	Events ev;
+	const LineSettings slow = settings(19200, QSerialPort::Data7,
+	    QSerialPort::EvenParity, QSerialPort::TwoStop,
+	    LineSettings::FlowRtsCts);
+	const LineSettings fast = settings(115200, QSerialPort::Data8,
+	    QSerialPort::OddParity, QSerialPort::OneStop, LineSettings::FlowNone);
+
+	watch(link, ev);
+	link.setPollInterval(POLL_MS);
+	board.plug();
+	link.open(node, slow);
+	CHECK(link.state() == Link::Open);
+	CHECK(link.lastError().isEmpty());
+	check_line(board.line(), slow, "opened");
+
+	CHECK(link.setLineSettings(fast));
+	CHECK(link.lineSettings() == fast);
+	check_line(board.line(), fast, "changed while open");
+
+	board.unplug();
+	CHECK(wait_for([&] { return link.state() == Link::Waiting; }));
+	board.plug();				/* a fresh pty, raw 8N1 */
+	CHECK(wait_for([&] { return link.state() == Link::Open; }));
+	check_line(board.line(), fast, "reopened");
+
+	CHECK(link.setLineSettings(slow));
+	check_line(board.line(), slow, "back to RTS/CTS");
+	// The pty never raises CTS, so a check of traffic here would test
+	// the pty, not the link: drop the handshake to see the bytes cross.
+	CHECK(link.setLineSettings(fast));
+	check_traffic(link, board, ev, "after changes");
+	link.close();
+}
+
+/* The loopback plug has its handshake lines tied: with RTS/CTS chosen it
+ * still never waits, and taking new settings is never an error. */
+static void
+test_loopback_line_settings()
+{
+	Link link;
+	Events ev;
+	const LineSettings rtscts = settings(300, QSerialPort::Data7,
+	    QSerialPort::EvenParity, QSerialPort::TwoStop,
+	    LineSettings::FlowRtsCts);
+
+	watch(link, ev);
+	link.open(Link::LOOPBACK, rtscts);
+	CHECK(link.state() == Link::Open);
+	link.write("clear to send");
+	CHECK(wait_for([&] { return ev.rx == "clear to send"; }));
+	CHECK(link.setLineSettings(LineSettings()));
+	CHECK(link.lastError().isEmpty());
+	link.close();
+}
+
+/* Only the loopback plug and the Pico-Thing's own ports are said to ignore
+ * their settings: anything else might be a UART that needs them. */
+static void
+test_ignores_line_settings(const QString &node)
+{
+	CHECK(Link::ignoresLineSettings(Link::LOOPBACK));
+	CHECK(!Link::ignoresLineSettings("cu.usbserial-A1"));
+	CHECK(!Link::ignoresLineSettings("cu.Bluetooth-Incoming-Port"));
+	CHECK(!Link::ignoresLineSettings(node));
+}
+
+/* Each port keeps its own settings, a port named by a path among them, and
+ * one never set gets the defaults. Settings back at the defaults leave
+ * nothing stored. */
+static void
+test_line_settings_stored(const QString &dir)
+{
+	QSettings s(dir + "/line.ini", QSettings::IniFormat);
+	const LineSettings a = settings(115200, QSerialPort::Data8,
+	    QSerialPort::NoParity, QSerialPort::OneStop,
+	    LineSettings::FlowRtsCts);
+	const LineSettings b = settings(1200, QSerialPort::Data7,
+	    QSerialPort::OddParity, QSerialPort::TwoStop,
+	    LineSettings::FlowNone);
+	LineSettings custom;
+
+	custom.baud = 31250;			/* not a standard rate */
+	a.save(s, "cu.usbserial-A1");
+	b.save(s, "/tmp/usim-console");
+	custom.save(s, "cu.usbserial-B2");
+	s.sync();
+
+	QSettings again(dir + "/line.ini", QSettings::IniFormat);
+	CHECK(LineSettings::load(again, "cu.usbserial-A1") == a);
+	CHECK(LineSettings::load(again, "/tmp/usim-console") == b);
+	CHECK(LineSettings::load(again, "cu.usbserial-B2") == custom);
+	CHECK(LineSettings::load(again, "cu.other") == LineSettings());
+	CHECK(LineSettings::load(again, "/tmp") == LineSettings());
+	/* A bare name is in /dev: a different port, whose slashes must not
+	 * be taken as the same nested groups. */
+	CHECK(LineSettings::load(again, "tmp/usim-console") == LineSettings());
+
+	// Values that cannot be set here come back as the defaults.
+	again.setValue("ports/cu.bad/parity", (int)QSerialPort::MarkParity);
+	again.setValue("ports/cu.bad/stop_bits", (int)QSerialPort::OneAndHalfStop);
+	again.setValue("ports/cu.bad/data_bits", 9);
+	again.setValue("ports/cu.bad/flow", 2);
+	again.setValue("ports/cu.bad/baud", 0);
+	CHECK(LineSettings::load(again, "cu.bad") == LineSettings());
+	again.remove("ports/cu.bad");
+
+	LineSettings().save(again, "cu.usbserial-A1");
+	LineSettings().save(again, "/tmp/usim-console");
+	LineSettings().save(again, "cu.usbserial-B2");
+	CHECK(again.allKeys().isEmpty());
+}
+
+static void
+test_summary()
+{
+	CHECK(LineSettings().summary() == "9600 8N1");
+	CHECK(settings(115200, QSerialPort::Data7, QSerialPort::EvenParity,
+	    QSerialPort::TwoStop, LineSettings::FlowRtsCts).summary() ==
+	    "115200 7E2 RTS/CTS");
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -599,6 +786,11 @@ main(int argc, char *argv[])
 	test_port_in_use(node);
 	test_choices();
 	test_typed_name();
+	test_line_settings(node);
+	test_loopback_line_settings();
+	test_ignores_line_settings(node);
+	test_line_settings_stored(dir.path());
+	test_summary();
 
 	if (failures == 0)
 		printf("test_link: all passed\n");

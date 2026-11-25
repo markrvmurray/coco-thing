@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include <Carbon/Carbon.h>
@@ -20,7 +21,9 @@
 #include <QComboBox>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QDir>
 #include <QFileInfo>
+#include <QGroupBox>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
@@ -33,11 +36,13 @@
 #include <QTabWidget>
 #include <QTemporaryDir>
 
-#include <memory>
 
+#include "connectdialog.h"
 #include "fontface.h"
+#include "linesettingsbox.h"
 #include "mainwindow.h"
 #include "prefs.h"
+#include "prefsdialog.h"
 #include "screen.h"
 #include "trafficpane.h"
 #include "video.h"
@@ -150,19 +155,32 @@ static void
 test_connect_dialog()
 {
 	const QStringList names = { "Loopback", "cu.usbmodem1101",
-	    "/tmp/usim-console" };
-	std::unique_ptr<QInputDialog> d(MainWindow::connectDialog(nullptr,
-	    names, 2));
+	    "cu.usbserial-A1", "/tmp/usim-console" };
+	LineSettings kept;
+	kept.baud = 115200;
+	kept.parity = QSerialPort::EvenParity;
+	kept.stop_bits = QSerialPort::TwoStop;
+	kept.flow = LineSettings::FlowRtsCts;
+	{
+		QSettings s;
+		kept.save(s, "cu.usbserial-A1");
+	}
 
-	CHECK(d->comboBoxItems() == names);
-	CHECK(d->isComboBoxEditable());
-	CHECK(d->textValue() == "/tmp/usim-console");
-
-	QComboBox *box = d->findChild<QComboBox *>();
-	CHECK(box != nullptr);
-	if (box == nullptr)
+	ConnectDialog d(names, 3);
+	QComboBox *box = d.findChild<QComboBox *>("port");
+	QComboBox *baud = d.findChild<QComboBox *>("baud");
+	QComboBox *flow = d.findChild<QComboBox *>("flow");
+	QLabel *note = d.findChild<QLabel *>("lineNote");
+	LineSettingsBox *line = d.findChild<LineSettingsBox *>();
+	CHECK(box != nullptr && baud != nullptr && flow != nullptr &&
+	    note != nullptr && line != nullptr);
+	if (box == nullptr || baud == nullptr || flow == nullptr ||
+	    note == nullptr || line == nullptr)
 		return;
+
+	CHECK(box->count() == names.size());
 	CHECK(box->isEditable() && box->lineEdit() != nullptr);
+	CHECK(d.port() == "/tmp/usim-console");
 	const QList<QWidget *> parts = { box, box->lineEdit(), box->view() };
 	for (QWidget *w : parts) {
 		for (QPalette::ColorGroup g :
@@ -175,11 +193,67 @@ test_connect_dialog()
 			    && back.blue() > back.green());
 		}
 	}
+	/* A port with nothing kept gets the defaults, to be chosen. */
+	CHECK(d.lineSettings() == LineSettings());
+	CHECK(line->applicable() && baud->isEnabled() && note->isHidden());
 
-	box->setCurrentIndex(1);
-	CHECK(d->textValue() == "cu.usbmodem1101");
+	/* Choosing a port shows what was kept for it. */
+	box->setCurrentIndex(2);
+	CHECK(d.port() == "cu.usbserial-A1");
+	CHECK(d.lineSettings() == kept);
+	CHECK(baud->currentText() == "115200");
+	CHECK(flow->currentText() == "RTS/CTS");
+
+	/* Any rate may be typed; one not yet a number leaves the last. */
+	baud->setEditText("31250");
+	CHECK(d.lineSettings().baud == 31250);
+	baud->setEditText("");
+	CHECK(d.lineSettings().baud == kept.baud);
+
+	/* The loopback plug takes no settings, and says so. */
+	box->setCurrentIndex(0);
+	CHECK(!line->applicable() && !baud->isEnabled() && !flow->isEnabled());
+	CHECK(!note->isHidden() && note->text().contains("loopback"));
+
+	/* A typed path; back to a port that takes settings. */
 	box->lineEdit()->setText("~/usim-console");
-	CHECK(d->textValue() == "~/usim-console");
+	CHECK(d.port() == QDir::homePath() + "/usim-console");
+	CHECK(line->applicable() && baud->isEnabled() && note->isHidden());
+	CHECK(d.lineSettings() == LineSettings());
+
+	QSettings().remove("ports");
+}
+
+/* Preferences edits the line settings of the port in use, and has none to
+ * edit with no port. */
+static void
+test_prefs_line_settings()
+{
+	LineSettings l;
+	l.baud = 4800;
+	l.data_bits = QSerialPort::Data7;
+
+	PrefsDialog with(Prefs(), "/dev/cu.usbserial-A1", l);
+	LineSettingsBox *box = with.findChild<LineSettingsBox *>();
+	QGroupBox *group = with.findChild<QGroupBox *>("lineGroup");
+	CHECK(box != nullptr && group != nullptr);
+	if (box == nullptr || group == nullptr)
+		return;
+	CHECK(with.lineSettings() == l && box->applicable());
+	CHECK(group->title() == "Line settings for cu.usbserial-A1");
+	QComboBox *flow = with.findChild<QComboBox *>("flow");
+	CHECK(flow != nullptr);
+	if (flow != nullptr)
+		flow->setCurrentIndex(flow->findText("RTS/CTS"));
+	CHECK(with.lineSettings().flow == LineSettings::FlowRtsCts);
+
+	PrefsDialog without{ Prefs() };
+	box = without.findChild<LineSettingsBox *>();
+	CHECK(box != nullptr && !box->applicable());
+
+	PrefsDialog loopback(Prefs(), Link::LOOPBACK);
+	box = loopback.findChild<LineSettingsBox *>();
+	CHECK(box != nullptr && !box->applicable());
 }
 
 int
@@ -200,6 +274,7 @@ main(int argc, char *argv[])
 
 	test_prefs_keep_only_changes();
 	test_connect_dialog();
+	test_prefs_line_settings();
 
 	/* A face of solid cells, as the font in Preferences, so the tab's
 	 * title can be told apart from one in the built-in face. */
@@ -228,9 +303,30 @@ main(int argc, char *argv[])
 	}
 	fcntl(board, F_SETFL, O_NONBLOCK);
 
+	/* The board's port has settings kept for it, which the window opens
+	 * it with at start-up and shows. */
+	LineSettings line;
+	line.baud = 2400;
+	line.parity = QSerialPort::EvenParity;
+	line.stop_bits = QSerialPort::TwoStop;
+	{
+		QSettings s;
+		line.save(s, ptsname(board));
+	}
+
 	MainWindow *w = new MainWindow(ptsname(board));
 	w->show();
 	spin(200);
+	{
+		struct termios t = {};
+		CHECK(tcgetattr(board, &t) == 0);
+		CHECK(cfgetospeed(&t) == 2400);
+		CHECK((t.c_cflag & (PARENB | PARODD | CSTOPB | CSIZE)) ==
+		    (PARENB | CSTOPB | CS8));
+		QLabel *state = w->findChild<QLabel *>("linkState");
+		CHECK(state != nullptr &&
+		    state->text().endsWith("(2400 8E2)"));
+	}
 	Screen *screen = w->findChild<Screen *>();
 	CHECK(screen != nullptr);
 	screen->setFocus();

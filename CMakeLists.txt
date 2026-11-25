@@ -49,6 +49,8 @@ add_library(termcore STATIC
     src/terminal.h
     src/link.cpp
     src/link.h
+    src/linesettings.cpp
+    src/linesettings.h
     src/fontface.cpp
     src/fontface.h
     src/prefs.cpp
@@ -84,6 +86,10 @@ qt_add_executable(coco-thing
     src/screen.h
     src/prefsdialog.cpp
     src/prefsdialog.h
+    src/connectdialog.cpp
+    src/connectdialog.h
+    src/linesettingsbox.cpp
+    src/linesettingsbox.h
     src/trafficpane.cpp
     src/trafficpane.h
 )
@@ -143,7 +149,8 @@ add_test(NAME keyboard COMMAND test_keyboard)
 set_tests_properties(keyboard PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
 
 add_executable(test_mainwindow tests/test_mainwindow.cpp src/mainwindow.cpp
-    src/screen.cpp src/prefsdialog.cpp src/trafficpane.cpp)
+    src/screen.cpp src/prefsdialog.cpp src/trafficpane.cpp
+    src/connectdialog.cpp src/linesettingsbox.cpp)
 target_link_libraries(test_mainwindow PRIVATE termcore Qt6::Widgets)
 add_test(NAME mainwindow COMMAND test_mainwindow)
 set_tests_properties(mainwindow PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)

@@ -13,7 +13,9 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFontComboBox>
+#include <QFileInfo>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QGridLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -23,7 +25,9 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 
+#include "connectdialog.h"
 #include "fontface.h"
+#include "linesettingsbox.h"
 
 static const char *PREVIEW_TEXT[] = {
 	"OS-9 Level Two  $1B graphics",
@@ -32,7 +36,8 @@ static const char *PREVIEW_TEXT[] = {
 	"└──┘ ☺♥♦♣♠ éüç αßπ",	/* CP437 has ß, used for beta */
 };
 
-PrefsDialog::PrefsDialog(const Prefs &p, QWidget *parent)
+PrefsDialog::PrefsDialog(const Prefs &p, const QString &port,
+    const LineSettings &line, QWidget *parent)
 	: QDialog(parent)
 {
 	setWindowTitle("Preferences");
@@ -40,7 +45,7 @@ PrefsDialog::PrefsDialog(const Prefs &p, QWidget *parent)
 	QTabWidget *tabs = new QTabWidget(this);
 	tabs->addTab(fontTab(p), "Font");
 	tabs->addTab(displayTab(p), "Display");
-	tabs->addTab(connectionTab(p), "Connection");
+	tabs->addTab(connectionTab(p, port, line), "Connection");
 
 	QDialogButtonBox *buttons = new QDialogButtonBox(
 	    QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -194,7 +199,8 @@ PrefsDialog::displayTab(const Prefs &p)
 }
 
 QWidget *
-PrefsDialog::connectionTab(const Prefs &p)
+PrefsDialog::connectionTab(const Prefs &p, const QString &port,
+    const LineSettings &line)
 {
 	QWidget *tab = new QWidget;
 
@@ -211,8 +217,32 @@ PrefsDialog::connectionTab(const Prefs &p)
 	v->addWidget(auto_reconnect);
 	v->addWidget(clear_on_reconnect);
 	v->addWidget(connect_at_start);
+
+	// The port in use: its settings change at once, and are kept for it.
+	line_box = new LineSettingsBox;
+	line_box->setSettings(line);
+	if (port.isEmpty()) {
+		line_box->setApplicable(false, "Connect to a port to choose its "
+		    "line settings.");
+	} else {
+		const QString why = ConnectDialog::noSettingsReason(port);
+		line_box->setApplicable(why.isEmpty(), why);
+	}
+	QGroupBox *group = new QGroupBox(port.isEmpty() ? QString("Line settings") :
+	    QString("Line settings for %1").arg(QFileInfo(port).fileName()));
+	group->setObjectName("lineGroup");
+	group->setToolTip(port);
+	QVBoxLayout *g = new QVBoxLayout(group);
+	g->addWidget(line_box);
+	v->addWidget(group);
 	v->addStretch(1);
 	return tab;
+}
+
+LineSettings
+PrefsDialog::lineSettings() const
+{
+	return line_box->settings();
 }
 
 Prefs

@@ -1,14 +1,13 @@
 /*
  * mainwindow.h
  *
- * The window: the screen, the link to the board's USB CDC console, and the
- * frame timer that runs the firmware and repaints.
+ * The window: the screen, the link to the board (its USB CDC console, or
+ * any serial port), and the frame timer that runs the firmware and repaints.
  */
 
 #pragma once
 
 #include <QElapsedTimer>
-#include <QInputDialog>
 #include <QLabel>
 #include <QMainWindow>
 #include <QScrollBar>
@@ -28,12 +27,6 @@ class MainWindow : public QMainWindow {
 public:
 	explicit MainWindow(const QString &port_name, QWidget *parent = nullptr);
 	~MainWindow() override;
-
-	/* The Connect dialog: `names` in an editable list, so a path can be
-	 * typed, with `preferred` chosen. The chosen or typed line is shown
-	 * white on blue, wherever it is highlighted. */
-	static QInputDialog *connectDialog(QWidget *parent,
-	    const QStringList &names, int preferred);
 
 protected:
 	void closeEvent(QCloseEvent *ev) override;

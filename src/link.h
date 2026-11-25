@@ -1,7 +1,8 @@
 /*
  * link.h
  *
- * The serial link to the board's USB CDC console, kept up across resets.
+ * The serial link to the board, kept up across resets: the board's USB CDC
+ * console, or any serial port with its line settings (linesettings.h).
  *
  * When the board resets, its USB device goes away and the port's device node
  * vanishes; it comes back under the same name once the board re-enumerates.
@@ -34,6 +35,8 @@
 #include <QStringList>
 #include <QTimer>
 
+#include "linesettings.h"
+
 class Link : public QObject {
 	Q_OBJECT
 
@@ -63,11 +66,23 @@ public:
 	 * taken as the home directory. */
 	static QString typedName(const QString &typed);
 
-	/* Connect to `name` (e.g. cu.usbmodem1101, or an absolute path) and
-	 * keep it connected until close(). */
-	void open(const QString &name);
+	/* Whether `name`'s line settings make no difference: the loopback
+	 * plug, or one of the Pico-Thing's own USB serial ports, known by its
+	 * vendor and product ids. They are still applied there, harmlessly,
+	 * so a wrong answer costs only how the settings are shown. */
+	static bool ignoresLineSettings(const QString &name);
+
+	/* Connect to `name` (e.g. cu.usbmodem1101, or an absolute path) with
+	 * `line`, and keep it connected until close(). The settings are
+	 * applied again each time the port is reopened. */
+	void open(const QString &name, const LineSettings &line = {});
 	void close();
 	void write(const QByteArray &bytes);
+
+	/* Change the line settings, at once if the port is open. False, with
+	 * lastError() set, if the port refused them. */
+	bool setLineSettings(const LineSettings &line);
+	LineSettings lineSettings() const { return line; }
 
 	State state() const { return st; }
 	QString portName() const { return wanted; }
@@ -111,6 +126,7 @@ private:
 	QSerialPort port;
 	QTimer poll;
 	QString wanted;
+	LineSettings line;
 	QString error;
 	State st = Closed;
 	bool was_open = false;
