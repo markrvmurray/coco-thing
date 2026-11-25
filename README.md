@@ -2,12 +2,14 @@
 
 A macOS terminal for the [Pico-Thing](https://github.com/markrvmurray/pico-thing-main), a
 real MC6809/HD6309 board with RP2350 companions. It talks to the board's USB serial console (or
-to any serial port, or to the USim emulator's console) and draws exactly what the board's DVI
+to any serial port, or to the [USim](https://github.com/markrvmurray/usim/tree/pico-thing)
+emulator's console) and draws exactly what the board's DVI
 video console draws: the CoCo 3 / OS-9 control codes, the `$1B` graphics commands, windows,
 overlays and fonts.
 
 It can draw exactly the same because it doesn't copy the renderer: it compiles the
-**pico-thing-video firmware's own sources** unchanged, as the USim emulator does. The firmware's
+**[pico-thing-video](https://github.com/markrvmurray/pico-thing-video) firmware's own sources**
+unchanged, as the USim emulator does. The firmware's
 text, graphics and keyboard handling run on the host, and coco-thing supplies only the platform
 pieces: the serial link, the window, the keyboard and the pasteboard.
 
@@ -38,8 +40,9 @@ pieces: the serial link, the window, the keyboard and the pasteboard.
 
 - macOS. The keyboard map is macOS-only, and CMake stops on other platforms.
 - Qt 6 with the Widgets and SerialPort modules, for example `brew install qt`.
-- A checkout of **pico-thing-video**, the video firmware, whose sources are compiled in. By
-  default it is expected at `~/GitHub/PICO/pico-thing-video`; set `PICOVIDEO` to use another path.
+- A checkout of **pico-thing-video**, the video firmware, whose sources are compiled in:
+  https://github.com/markrvmurray/pico-thing-video. By default the build looks for it at
+  `~/GitHub/PICO/pico-thing-video`; set `PICOVIDEO` to use another path.
   Snapshots of the two are tagged in step: build coco-thing `SNAPSHOT-YYYYMMDD` against
   pico-thing-video's tag of the same name.
 
@@ -65,9 +68,16 @@ codesign --force --sign - ~/Applications/coco-thing.app
 
 - **The board:** Connection ▸ Connect… (⌘K) and choose its `cu.usbmodem…` port. Or start it with
   the port name: `open build/coco-thing.app --args cu.usbmodem1101`.
-- **USim:** run `usim09pt --console-pty=/tmp/usim-console --prompt` and type `/tmp/usim-console`
-  into Connect. The path is a symlink to a new pty for each run, and coco-thing follows it from
-  one run to the next.
+- **USim** (`usim09pt`, from [usim's `pico-thing`
+  branch](https://github.com/markrvmurray/usim/blob/pico-thing/README-pico-thing.md)): start it
+  with its console on a pty, held at reset by `--prompt`:
+
+  ```sh
+  usim09pt --console-pty=/tmp/usim-console --prompt -d boot.dsk firmware.srec
+  ```
+
+  Type `/tmp/usim-console` into Connect, then `run` at the `usim09pt>` prompt. The path is a
+  symlink to a new pty for each run, and coco-thing follows it from one run to the next.
 - **Another serial port:** choose it in Connect and set its line settings there. Preferences ▸
   Connection changes the settings of the port in use.
 
