@@ -92,3 +92,9 @@ on printable characters, and the Help key is Insert.
   `ESC [ 18 t`) do work, so a guest can still learn the text area.
 - The Tone command (`$1B $27`) is not played yet.
 - The firmware tree is not pinned. Any commit of it can be built, so use the matching snapshot tag.
+
+## Licence
+
+coco-thing is under the BSD 2-Clause licence (see [LICENSE](LICENSE)). The pico-thing-video
+sources it compiles are under their own licence, and the built-in Spleen face is
+[Spleen](https://github.com/fcambus/spleen)'s, also BSD 2-Clause.
